@@ -49,7 +49,7 @@
         "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
         "phone": { "type": "string", "maxLength": 20 },
         "preferredTable": { "type": "string", "maxLength": 20 },
-        "dietaryPreference": { "type": "string", "enum": ["all", "veg", "nonveg"] },
+        "dietaryPreference": { "type": "string", "enum": ["all", "veg"] },
         "active": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -255,6 +255,7 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "contactPerson": { "type": "string", "maxLength": 80 },
         "phone": { "type": "string", "maxLength": 25 },
+        "email": { "type": "string", "maxLength": 120 },
         "category": { "type": "string", "maxLength": 50 },
         "address": { "type": "string", "maxLength": 200 },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -292,9 +293,10 @@
         "overallRating": { "type": "number" },
         "comment": { "type": "string", "maxLength": 500 },
         "googleConsent": { "type": "boolean" },
+        "approved": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "foodRating", "serviceRating", "ambianceRating", "overallRating", "googleConsent", "createdAt"]
+      "required": ["id", "foodRating", "serviceRating", "ambianceRating", "overallRating", "googleConsent", "approved", "createdAt"]
     },
     "Notification": {
       "title": "Notification",
@@ -302,7 +304,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "type": { "type": "string", "enum": ["qr_order", "waiter_order", "kitchen_update", "order_ready", "bill_request", "waiter_call", "low_stock", "cancelled"] },
+        "type": { "type": "string", "enum": ["qr_order", "waiter_order", "kitchen_update", "order_ready", "bill_request", "waiter_call", "low_stock", "supplier_reorder", "cancelled"] },
         "title": { "type": "string", "minLength": 1, "maxLength": 100 },
         "message": { "type": "string", "minLength": 1, "maxLength": 250 },
         "targetRoles": { "type": "array" },
@@ -332,6 +334,8 @@
         "taxes": { "type": "array" },
         "paymentMethods": { "type": "array" },
         "googleReviewUrl": { "type": "string", "maxLength": 300 },
+        "whatsappNumber": { "type": "string", "maxLength": 25 },
+        "googleMapsUrl": { "type": "string", "maxLength": 300 },
         "notificationsEnabled": { "type": "boolean" },
         "requireCustomerLogin": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }

@@ -70,6 +70,7 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
       const cat = categories.find((c) => c.id === editingItem.categoryId);
       await saveMenuItem({
         ...editingItem,
+        isVeg: true,
         categoryName: cat?.name || editingItem.categoryName || 'General',
       });
       setEditingItem(null);
@@ -113,7 +114,7 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
             Digital Menu & Recipe Catalog
           </h2>
           <p className="text-xs text-zinc-500 mt-0.5">
-            Manage dishes, INR pricing, availability, and kitchen stock recipe links
+            100% Pure Vegetarian Kitchen · Manage dishes, INR pricing, availability, and stock recipes
           </p>
         </div>
 
@@ -190,8 +191,10 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
                   <DishImage src={dish.imageUrl} alt={dish.name} className="w-full h-full" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11px] text-zinc-500">
-                    {dish.categoryName} · {dish.isVeg ? 'Veg' : 'Non-Veg'}
+                  <div className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                    <span>{dish.categoryName}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-emerald-700 font-medium">Pure Veg</span>
                     {dish.isBestseller ? ' · Bestseller' : ''}
                   </div>
                   <h3 className="text-sm font-bold text-zinc-900 mt-0.5 truncate">
@@ -377,15 +380,13 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
                 />
               </div>
 
-              <div className="flex flex-wrap gap-4 pt-1">
-                <label className="inline-flex items-center gap-2 font-medium cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editingItem.isVeg}
-                    onChange={(e) => setEditingItem({ ...editingItem, isVeg: e.target.checked })}
-                  />
-                  Pure Veg
-                </label>
+              <div className="flex flex-wrap items-center gap-4 pt-1">
+                <div className="inline-flex items-center gap-1.5 text-emerald-800 font-semibold">
+                  <span className="w-3 h-3 border border-emerald-700 flex items-center justify-center rounded-[2px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-700" />
+                  </span>
+                  100% Pure Veg
+                </div>
                 <label className="inline-flex items-center gap-2 font-medium cursor-pointer">
                   <input
                     type="checkbox"

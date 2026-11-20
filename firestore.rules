@@ -115,7 +115,7 @@ service cloud.firestore {
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
         (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
         (!('preferredTable' in data) || (data.preferredTable is string && data.preferredTable.size() <= 20)) &&
-        (!('dietaryPreference' in data) || data.dietaryPreference in ['all', 'veg', 'nonveg']) &&
+        (!('dietaryPreference' in data) || data.dietaryPreference in ['all', 'veg']) &&
         data.active is bool &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -172,7 +172,7 @@ service cloud.firestore {
         isNum(data.price) && data.price >= 0 && data.price <= 100000 &&
         data.categoryId is string && data.categoryId.size() >= 1 && data.categoryId.size() <= 64 &&
         data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 60 &&
-        data.isVeg is bool &&
+        data.isVeg is bool && data.isVeg == true &&
         data.isBestseller is bool &&
         data.available is bool &&
         (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 150000)) &&
@@ -286,11 +286,12 @@ service cloud.firestore {
 
     function isValidSupplier(data) {
       return data.keys().hasAll(['id', 'name', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'name', 'contactPerson', 'phone', 'category', 'address', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'contactPerson', 'phone', 'email', 'category', 'address', 'createdAt']) &&
         isValidId(data.id) &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
         (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 80)) &&
         (!('phone' in data) || (data.phone is string && data.phone.size() <= 25)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
         (!('category' in data) || (data.category is string && data.category.size() <= 50)) &&
         (!('address' in data) || (data.address is string && data.address.size() <= 200)) &&
         data.createdAt is timestamp;
@@ -309,8 +310,8 @@ service cloud.firestore {
     }
 
     function isValidFeedback(data) {
-      return data.keys().hasAll(['id', 'foodRating', 'serviceRating', 'ambianceRating', 'overallRating', 'googleConsent', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'orderId', 'orderNumber', 'tableNumber', 'guestName', 'foodRating', 'serviceRating', 'ambianceRating', 'overallRating', 'comment', 'googleConsent', 'createdAt']) &&
+      return data.keys().hasAll(['id', 'foodRating', 'serviceRating', 'ambianceRating', 'overallRating', 'googleConsent', 'approved', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'orderId', 'orderNumber', 'tableNumber', 'guestName', 'foodRating', 'serviceRating', 'ambianceRating', 'overallRating', 'comment', 'googleConsent', 'approved', 'createdAt']) &&
         isValidId(data.id) &&
         (!('orderId' in data) || (data.orderId is string && data.orderId.size() <= 128)) &&
         (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 32)) &&
@@ -322,6 +323,7 @@ service cloud.firestore {
         isNum(data.overallRating) && data.overallRating >= 1 && data.overallRating <= 5 &&
         (!('comment' in data) || (data.comment is string && data.comment.size() <= 500)) &&
         data.googleConsent is bool &&
+        data.approved is bool &&
         data.createdAt is timestamp;
     }
 
@@ -329,7 +331,7 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'type', 'title', 'message', 'targetRoles', 'read', 'createdAt']) &&
         data.keys().hasOnly(['id', 'type', 'title', 'message', 'targetRoles', 'relatedId', 'read', 'createdAt']) &&
         isValidId(data.id) &&
-        data.type in ['qr_order', 'waiter_order', 'kitchen_update', 'order_ready', 'bill_request', 'waiter_call', 'low_stock', 'cancelled'] &&
+        data.type in ['qr_order', 'waiter_order', 'kitchen_update', 'order_ready', 'bill_request', 'waiter_call', 'low_stock', 'supplier_reorder', 'cancelled'] &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
         data.message is string && data.message.size() >= 1 && data.message.size() <= 250 &&
         data.targetRoles is list && data.targetRoles.size() >= 1 && data.targetRoles.size() <= 5 && data.targetRoles[0] is string &&
@@ -340,7 +342,7 @@ service cloud.firestore {
 
     function isValidHotelSettings(data) {
       return data.keys().hasAll(['id', 'hotelName', 'currency', 'taxes', 'paymentMethods', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'hotelName', 'tagline', 'address', 'phone', 'email', 'gstin', 'currency', 'upiId', 'invoicePrefix', 'invoiceFooter', 'operatingHours', 'taxes', 'paymentMethods', 'googleReviewUrl', 'notificationsEnabled', 'requireCustomerLogin', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'hotelName', 'tagline', 'address', 'phone', 'email', 'gstin', 'currency', 'upiId', 'invoicePrefix', 'invoiceFooter', 'operatingHours', 'taxes', 'paymentMethods', 'googleReviewUrl', 'whatsappNumber', 'googleMapsUrl', 'notificationsEnabled', 'requireCustomerLogin', 'updatedAt']) &&
         isValidId(data.id) &&
         data.hotelName is string && data.hotelName.size() >= 1 && data.hotelName.size() <= 100 &&
         (!('tagline' in data) || (data.tagline is string && data.tagline.size() <= 120)) &&
@@ -356,6 +358,8 @@ service cloud.firestore {
         data.taxes is list && data.taxes.size() <= 6 && (data.taxes.size() == 0 || data.taxes[0] is map) &&
         data.paymentMethods is list && data.paymentMethods.size() >= 1 && data.paymentMethods.size() <= 8 && data.paymentMethods[0] is string &&
         (!('googleReviewUrl' in data) || (data.googleReviewUrl is string && data.googleReviewUrl.size() <= 300)) &&
+        (!('whatsappNumber' in data) || (data.whatsappNumber is string && data.whatsappNumber.size() <= 25)) &&
+        (!('googleMapsUrl' in data) || (data.googleMapsUrl is string && data.googleMapsUrl.size() <= 300)) &&
         (!('notificationsEnabled' in data) || data.notificationsEnabled is bool) &&
         (!('requireCustomerLogin' in data) || data.requireCustomerLogin is bool) &&
         data.updatedAt is timestamp;
@@ -655,17 +659,22 @@ service cloud.firestore {
       allow delete: if isValidId(requestId) && isAdminOrManager();
     }
 
-    // 13. Customer Feedback
+    // 13. Customer Feedback (Approved reviews visible on public homepage; staff view all)
     match /feedback/{feedbackId} {
-      allow get: if isValidId(feedbackId) && isActiveStaff();
-      allow list: if isActiveStaff();
+      allow get: if isValidId(feedbackId) && (isActiveStaff() || existing().approved == true);
+      allow list: if isActiveStaff() || existing().approved == true;
 
       allow create: if isValidId(feedbackId) && isValidFeedback(incoming()) &&
         incoming().id == feedbackId &&
+        incoming().approved == false &&
         incoming().createdAt == request.time;
 
-      allow update: if false;
-      allow delete: if isValidId(feedbackId) && isAdmin();
+      allow update: if isValidId(feedbackId) && isAdminOrManager() && isValidFeedback(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['approved']);
+
+      allow delete: if isValidId(feedbackId) && isAdminOrManager();
     }
 
     // 14. Operational Notifications

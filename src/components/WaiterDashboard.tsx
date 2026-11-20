@@ -101,6 +101,7 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
     return menuItems.filter(
       (m) =>
         m.available &&
+        m.isVeg !== false &&
         (!q || m.name.toLowerCase().includes(q) || m.categoryName.toLowerCase().includes(q))
     );
   }, [menuItems, searchMenu]);
@@ -491,7 +492,7 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
                         {dish.name}
                       </div>
                       <div className="text-xs text-zinc-500">
-                        {dish.isVeg ? 'Veg' : 'Non-Veg'} ·{' '}
+                        <span className="text-emerald-700 font-medium">Pure Veg</span> ·{' '}
                         <span className="font-mono-tabular font-semibold text-zinc-800">
                           {formatINR(dish.price)}
                         </span>

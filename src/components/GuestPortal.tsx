@@ -70,7 +70,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
   const [loading, setLoading] = useState(true);
 
   const [selectedCat, setSelectedCat] = useState<string>('all');
-  const [dietFilter, setDietFilter] = useState<'all' | 'veg' | 'nonveg' | 'bestseller'>('all');
+  const [dietFilter, setDietFilter] = useState<'all' | 'bestseller'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   const [cart, setCart] = useState<OrderItem[]>([]);
@@ -195,9 +195,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
 
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
+      if (item.isVeg === false) return false;
       if (selectedCat !== 'all' && item.categoryId !== selectedCat) return false;
-      if (dietFilter === 'veg' && !item.isVeg) return false;
-      if (dietFilter === 'nonveg' && item.isVeg) return false;
       if (dietFilter === 'bestseller' && !item.isBestseller) return false;
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -352,7 +351,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                 type="button"
                 onClick={onExitToStaffLogin}
                 className="p-2 rounded-lg bg-zinc-800 text-zinc-300 hover:text-white transition-colors shrink-0 cursor-pointer"
-                title="Back to Staff Login"
+                title="Back to Homepage"
               >
                 <ArrowLeft className="w-4 h-4" />
               </button>
@@ -403,7 +402,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
         <div className="absolute inset-x-0 bottom-0 max-w-5xl mx-auto px-4 pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-2">
           <div>
             <p className="text-xs font-medium text-[#D4AF37]">
-              {settings.tagline || 'Fine Dining & Authentic Hospitality'}
+              100% Pure Veg · {settings.tagline || 'Pure Vegetarian Dining & Hospitality'}
             </p>
             <h1 className="font-display text-2xl sm:text-3xl font-semibold text-white mt-0.5">
               Digital Table Menu · Table {table?.tableNumber || tableId}
@@ -474,9 +473,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
               <div className="flex items-center gap-1 p-1 bg-white border border-zinc-200 rounded-xl overflow-x-auto">
                 {(
                   [
-                    { id: 'all', label: 'All' },
-                    { id: 'veg', label: 'Pure Veg' },
-                    { id: 'nonveg', label: 'Non-Veg' },
+                    { id: 'all', label: 'All Pure Veg' },
                     { id: 'bestseller', label: 'Bestsellers' },
                   ] as const
                 ).map((f) => (
@@ -570,23 +567,11 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                       <div className="flex-1 p-4 flex flex-col justify-between min-w-0">
                         <div>
                           <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
-                            <span
-                              className={`inline-flex items-center gap-1 font-medium ${
-                                dish.isVeg ? 'text-emerald-700' : 'text-red-700'
-                              }`}
-                            >
-                              <span
-                                className={`w-2.5 h-2.5 border flex items-center justify-center rounded-[2px] ${
-                                  dish.isVeg ? 'border-emerald-700' : 'border-red-700'
-                                }`}
-                              >
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    dish.isVeg ? 'bg-emerald-700' : 'bg-red-700'
-                                  }`}
-                                />
+                            <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+                              <span className="w-2.5 h-2.5 border border-emerald-700 flex items-center justify-center rounded-[2px]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-700" />
                               </span>
-                              {dish.isVeg ? 'Veg' : 'Non-Veg'}
+                              Pure Veg
                             </span>
                             {dish.isBestseller && (
                               <>

@@ -1,16 +1,22 @@
 import React, { useMemo, useState } from 'react';
+import { Area, AreaChart, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   AlertTriangle,
+  Bell,
   CheckCircle2,
+  Copy,
   Download,
+  Mail,
   Package,
   Pencil,
   Plus,
   Search,
+  Send,
   Truck,
   X,
 } from 'lucide-react';
 import {
+  dispatchSupplierReorderNotification,
   recordStockMovement,
   saveInventoryItem,
   saveSupplier,
@@ -21,7 +27,7 @@ import type {
   StaffProfile,
   Supplier,
 } from '../types';
-import { downloadCSV, formatDateTime, formatINR } from '../utils/format';
+import { downloadCSV, formatDateTime, formatINR, toDate } from '../utils/format';
 
 interface InventoryViewProps {
   currentUser: StaffProfile;
@@ -73,6 +79,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     (Omit<Supplier, 'createdAt'> & { isNew?: boolean }) | null
   >(null);
 
+  const [reorderModalOpen, setReorderModalOpen] = useState(false);
+  const [selectedSupplierKey, setSelectedSupplierKey] = useState<string>('');
+  const [draftRecipientEmail, setDraftRecipientEmail] = useState<string>('');
+  const [draftEmailSubject, setDraftEmailSubject] = useState<string>('');
+  const [draftEmailBody, setDraftEmailBody] = useState<string>('');
+  const [copiedDraft, setCopiedDraft] = useState(false);
+  const [dispatchingReorder, setDispatchingReorder] = useState(false);
+
   const canManage =
     currentUser.role === 'super_admin' || currentUser.role === 'manager';
 
@@ -90,6 +104,196 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   );
 
   const lowStockCount = lowStockItems.length;
+
+  const criticalStats = useMemo(() => {
+    let outOfStockCount = 0;
+    let estimatedReorderCost = 0;
+    for (const item of lowStockItems) {
+      if (item.quantity <= 0) outOfStockCount += 1;
+      const reorderQty = Math.max(1, Math.ceil(Math.max(item.minThreshold * 2 - item.quantity, 5)));
+      estimatedReorderCost += reorderQty * (Number(item.unitCost) || 0);
+    }
+    return {
+      outOfStockCount,
+      estimatedReorderCost: Math.round(estimatedReorderCost * 100) / 100,
+    };
+  }, [lowStockItems]);
+
+  const supplierReorderGroups = useMemo(() => {
+    type ReorderLine = {
+      item: InventoryItem;
+      reorderQty: number;
+      lineEstimate: number;
+    };
+    type SupplierGroup = {
+      key: string;
+      supplier?: Supplier;
+      supplierName: string;
+      items: ReorderLine[];
+      estimatedTotal: number;
+    };
+
+    const groupsMap = new Map<string, SupplierGroup>();
+
+    for (const item of lowStockItems) {
+      const matchedSupplier =
+        suppliers.find((s) => s.id === item.supplierId) ||
+        (item.supplierName
+          ? suppliers.find(
+              (s) => s.name.toLowerCase() === item.supplierName?.trim().toLowerCase()
+            )
+          : undefined);
+      const key = matchedSupplier?.id || item.supplierId || '__unassigned__';
+      const supplierName =
+        matchedSupplier?.name || item.supplierName || 'Unassigned Supplier';
+      const reorderQty = Math.max(
+        1,
+        Math.ceil(Math.max(item.minThreshold * 2 - item.quantity, 5))
+      );
+      const lineEstimate = Math.round(reorderQty * (Number(item.unitCost) || 0) * 100) / 100;
+
+      let existing = groupsMap.get(key);
+      if (!existing) {
+        existing = {
+          key,
+          supplier: matchedSupplier,
+          supplierName,
+          items: [],
+          estimatedTotal: 0,
+        };
+        groupsMap.set(key, existing);
+      }
+      existing.items.push({ item, reorderQty, lineEstimate });
+      existing.estimatedTotal =
+        Math.round((existing.estimatedTotal + lineEstimate) * 100) / 100;
+    }
+
+    return Array.from(groupsMap.values()).sort((a, b) => {
+      if (a.key === '__unassigned__') return 1;
+      if (b.key === '__unassigned__') return -1;
+      return b.items.length - a.items.length;
+    });
+  }, [lowStockItems, suppliers]);
+
+  const activeReorderGroup = useMemo(
+    () =>
+      supplierReorderGroups.find((g) => g.key === selectedSupplierKey) ||
+      supplierReorderGroups[0] ||
+      null,
+    [supplierReorderGroups, selectedSupplierKey]
+  );
+
+  const buildSupplierDraft = (group: (typeof supplierReorderGroups)[number]) => {
+    const recipient = group.supplier?.email || '';
+    const count = group.items.length;
+    const subject = `Reorder Request: ${count} Critical Inventory ${
+      count === 1 ? 'Item' : 'Items'
+    } — Hotel Rudraksh Inn`;
+    const greetingName = group.supplier?.contactPerson || group.supplierName;
+    const itemLines = group.items
+      .map(
+        ({ item, reorderQty, lineEstimate }, idx) =>
+          `${idx + 1}. ${item.name} — Current: ${item.quantity} ${item.unit} (Min Alert: ${item.minThreshold} ${item.unit}) | Reorder Qty: +${reorderQty} ${item.unit} (Est. ${formatINR(lineEstimate)})`
+      )
+      .join('\n');
+
+    const body = [
+      `Dear ${greetingName},`,
+      '',
+      'Please arrange an immediate restock delivery for Hotel Rudraksh Inn (Tower Chowk, Station Road, Deoghar, Jharkhand 814112) for the following critical low-stock items:',
+      '',
+      itemLines,
+      '',
+      `Estimated Reorder Total: ${formatINR(group.estimatedTotal)}`,
+      '',
+      'Kindly confirm availability and expected dispatch time.',
+      '',
+      'Regards,',
+      currentUser.displayName,
+      'Kitchen & Inventory Operations · Hotel Rudraksh Inn',
+    ].join('\n');
+
+    return { recipient, subject, body };
+  };
+
+  const selectSupplierGroup = (group: (typeof supplierReorderGroups)[number]) => {
+    const { recipient, subject, body } = buildSupplierDraft(group);
+    setSelectedSupplierKey(group.key);
+    setDraftRecipientEmail(recipient);
+    setDraftEmailSubject(subject);
+    setDraftEmailBody(body);
+    setCopiedDraft(false);
+  };
+
+  const openSupplierReorderModal = () => {
+    const firstGroup = supplierReorderGroups[0];
+    if (!firstGroup) return;
+    selectSupplierGroup(firstGroup);
+    setReorderModalOpen(true);
+  };
+
+  const handleCopyReorderDraft = async () => {
+    const fullText = [
+      draftRecipientEmail ? `To: ${draftRecipientEmail}` : '',
+      `Subject: ${draftEmailSubject}`,
+      '',
+      draftEmailBody,
+    ]
+      .filter((line, idx) => idx > 0 || line !== '')
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(fullText);
+      setCopiedDraft(true);
+      showToast('Reorder email draft copied to clipboard.');
+      setTimeout(() => setCopiedDraft(false), 2500);
+    } catch {
+      showToast('Unable to copy automatically — please copy from the text box.', 'error');
+    }
+  };
+
+  const handleTriggerReorderNotification = async () => {
+    if (!activeReorderGroup) return;
+    setDispatchingReorder(true);
+    try {
+      await dispatchSupplierReorderNotification({
+        supplierId: activeReorderGroup.supplier?.id,
+        supplierName: activeReorderGroup.supplierName,
+        recipientEmail: draftRecipientEmail,
+        itemNames: activeReorderGroup.items.map((line) => line.item.name),
+        estimatedCost: activeReorderGroup.estimatedTotal,
+        actor: currentUser,
+      });
+      showToast(
+        `Reorder notification sent for ${activeReorderGroup.supplierName} (${activeReorderGroup.items.length} items).`
+      );
+      setReorderModalOpen(false);
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : 'Failed to send reorder notification.',
+        'error'
+      );
+    } finally {
+      setDispatchingReorder(false);
+    }
+  };
+
+  const handleSaveSupplierEmail = async () => {
+    if (!activeReorderGroup?.supplier) return;
+    const cleanEmail = draftRecipientEmail.trim().toLowerCase();
+    try {
+      await saveSupplier({
+        ...activeReorderGroup.supplier,
+        email: cleanEmail,
+        isNew: false,
+      });
+      showToast(`Saved email ${cleanEmail || '(cleared)'} for ${activeReorderGroup.supplier.name}.`);
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : 'Unable to save supplier email.',
+        'error'
+      );
+    }
+  };
 
   const displayedInventory = useMemo(() => {
     const queryText = searchTerm.trim().toLowerCase();
@@ -124,6 +328,67 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       });
   }, [inventory, stockFilter, searchTerm]);
 
+  // Aggregate last 7 calendar days of consumption per ingredient
+  const consumptionWindow = useMemo(() => {
+    const toLocalKey = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    const today = new Date();
+    const days: { key: string; day: string }[] = [];
+    const dayKeySet = new Set<string>();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      const key = toLocalKey(d);
+      dayKeySet.add(key);
+      days.push({
+        key,
+        day: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+      });
+    }
+
+    const perItemDayTotals = new Map<string, Map<string, number>>();
+    for (const log of logs) {
+      if (log.type !== 'consumption') continue;
+      const d = toDate(log.createdAt);
+      const key = toLocalKey(d);
+      if (!dayKeySet.has(key)) continue;
+
+      const consumed = Math.abs(Number(log.quantityDelta) || 0);
+      if (consumed <= 0) continue;
+
+      let dayMap = perItemDayTotals.get(log.itemId);
+      if (!dayMap) {
+        dayMap = new Map<string, number>();
+        perItemDayTotals.set(log.itemId, dayMap);
+      }
+      dayMap.set(key, (dayMap.get(key) || 0) + consumed);
+    }
+
+    return { days, perItemDayTotals };
+  }, [logs]);
+
+  const getItemConsumptionSeries = (itemId: string) => {
+    const dayMap = consumptionWindow.perItemDayTotals.get(itemId);
+    let total = 0;
+    const series = consumptionWindow.days.map((slot) => {
+      const raw = dayMap?.get(slot.key) || 0;
+      const rounded = Math.round(raw * 1000) / 1000;
+      total += rounded;
+      return { day: slot.day, consumed: rounded };
+    });
+    return {
+      series,
+      total: Math.round(total * 1000) / 1000,
+    };
+  };
+
   const handleExportInventoryCSV = () => {
     downloadCSV(
       'hotel-rudraksh-inventory.csv',
@@ -134,6 +399,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         'Unit',
         'Min Threshold',
         'Status',
+        '7d Consumption',
         'Unit Cost (INR)',
         'Valuation (INR)',
         'Supplier',
@@ -145,6 +411,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           : health.isApproaching
           ? 'Near Limit'
           : 'Optimal';
+        const usage7d = getItemConsumptionSeries(i.id).total;
         return [
           i.name,
           i.category,
@@ -152,6 +419,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           i.unit,
           i.minThreshold,
           statusLabel,
+          usage7d,
           i.unitCost,
           Math.round(i.quantity * i.unitCost * 100) / 100,
           i.supplierName || '',
@@ -320,6 +588,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   name: '',
                   contactPerson: '',
                   phone: '',
+                  email: '',
                   category: 'Fresh Produce',
                   address: 'Deoghar, Jharkhand',
                   isNew: true,
@@ -337,45 +606,118 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       {/* TAB 1: Stock List */}
       {tab === 'stock' && (
         <div className="space-y-4">
-          {/* Low-Stock Summary Alert Banner */}
-          {lowStockCount > 0 && (
-            <div
-              role="alert"
-              className="bg-amber-50/75 border border-amber-200 rounded-xl px-4 py-3.5 flex flex-wrap items-center justify-between gap-3"
-            >
+          {/* Critical Items Summary Card */}
+          <section
+            aria-label="Critical Items Summary"
+            className={`rounded-xl border p-4 sm:p-5 transition-colors ${
+              lowStockCount > 0
+                ? 'bg-amber-50/70 border-amber-300'
+                : 'bg-white border-zinc-200'
+            }`}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-3 min-w-0">
-                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div className="text-xs min-w-0">
-                  <div className="font-semibold text-amber-900">
-                    {lowStockCount}{' '}
-                    {lowStockCount === 1
-                      ? 'ingredient is at or below minimum stock threshold'
-                      : 'ingredients are at or below minimum stock threshold'}
+                <div
+                  className={`p-2 rounded-lg shrink-0 ${
+                    lowStockCount > 0
+                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  }`}
+                >
+                  {lowStockCount > 0 ? (
+                    <AlertTriangle className="w-4 h-4" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-bold text-zinc-900">Critical Items</h3>
+                    <span className="text-xs font-mono-tabular font-semibold text-zinc-600">
+                      · {lowStockCount} {lowStockCount === 1 ? 'item' : 'items'} needing immediate reorder
+                    </span>
                   </div>
-                  <div className="text-amber-800/90 mt-0.5 truncate">
-                    Priority restock:{' '}
-                    {lowStockItems
-                      .slice(0, 3)
-                      .map((i) => `${i.name} (${i.quantity}/${i.minThreshold} ${i.unit})`)
-                      .join(' · ')}
-                    {lowStockCount > 3 ? ` · +${lowStockCount - 3} more` : ''}
-                  </div>
+                  <p className="text-xs text-zinc-600 mt-0.5">
+                    {lowStockCount > 0
+                      ? `${criticalStats.outOfStockCount} out of stock · Estimated restock budget ${formatINR(criticalStats.estimatedReorderCost)}`
+                      : `All ${inventory.length} tracked ingredients are above their configured Min Alert thresholds.`}
+                  </p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setStockFilter((prev) => (prev === 'low' ? 'all' : 'low'))
-                }
-                className="px-3.5 py-1.5 rounded-lg bg-[#141518] text-[#D4AF37] text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer hover:bg-zinc-800 transition-colors"
-              >
-                {stockFilter === 'low'
-                  ? `Show All (${inventory.length})`
-                  : `Show Low Stock (${lowStockCount})`}
-              </button>
+              {lowStockCount > 0 && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={openSupplierReorderModal}
+                    className="px-3.5 py-1.5 rounded-lg bg-[#141518] text-[#D4AF37] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer hover:bg-zinc-800 transition-colors"
+                  >
+                    <Send className="w-3.5 h-3.5 shrink-0" />
+                    <span>Send to Supplier</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStockFilter((prev) => (prev === 'low' ? 'all' : 'low'))
+                    }
+                    className={`px-3.5 py-1.5 rounded-lg border text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                      stockFilter === 'low'
+                        ? 'bg-amber-600 border-amber-600 text-white hover:bg-amber-700'
+                        : 'bg-white border-amber-300 text-amber-900 hover:bg-amber-100/70'
+                    }`}
+                  >
+                    {stockFilter === 'low'
+                      ? `Show All (${inventory.length})`
+                      : `Filter Critical (${lowStockCount})`}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+
+            {lowStockCount > 0 && (
+              <div className="mt-4 pt-3.5 border-t border-amber-200/80 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {lowStockItems.slice(0, 6).map((item) => {
+                  const reorderQty = Math.max(
+                    1,
+                    Math.ceil(Math.max(item.minThreshold * 2 - item.quantity, 5))
+                  );
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-white border border-amber-200 rounded-lg px-3 py-2.5 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-zinc-900 truncate">
+                          {item.name}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 font-mono-tabular mt-0.5 truncate">
+                          {item.quantity} / {item.minThreshold} {item.unit}
+                          {item.supplierName ? ` · ${item.supplierName}` : ''}
+                        </div>
+                      </div>
+                      {canManage ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMovementTarget({ item, type: 'purchase' });
+                            setDeltaQty(reorderQty);
+                            setMovementNote('Immediate reorder (Critical Stock)');
+                          }}
+                          className="px-2.5 py-1 rounded bg-[#141518] text-[#D4AF37] text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer hover:bg-zinc-800 transition-colors"
+                        >
+                          Reorder +{reorderQty} {item.unit}
+                        </button>
+                      ) : (
+                        <span className="text-[11px] font-mono-tabular font-semibold text-amber-800 shrink-0">
+                          Need +{reorderQty} {item.unit}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
           {/* Search & Stock Status Filter Toolbar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -483,7 +825,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <th className="px-4 py-3 font-semibold">Ingredient</th>
                       <th className="px-4 py-3 font-semibold">Category</th>
                       <th className="px-4 py-3 font-semibold">Supplier</th>
-                      <th className="px-4 py-3 font-semibold">Stock Level</th>
+                      <th className="px-4 py-3 font-semibold">Stock Level &amp; 7d Usage</th>
                       <th className="px-4 py-3 font-semibold text-right">Min Alert</th>
                       <th className="px-4 py-3 font-semibold text-right">Unit Cost</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
@@ -493,6 +835,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <tbody className="divide-y divide-zinc-100">
                     {displayedInventory.map((it) => {
                       const health = getStockHealth(it);
+                      const spark = getItemConsumptionSeries(it.id);
+                      const sparkStroke = health.isLow ? '#D97706' : '#9A7415';
                       const suggestedRestock = Math.max(
                         1,
                         Math.ceil(Math.max(it.minThreshold * 2 - it.quantity, 5))
@@ -514,39 +858,127 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <td className="px-4 py-3 text-zinc-600">
                             {it.supplierName || '—'}
                           </td>
-                          <td className="px-4 py-3 min-w-[165px]">
-                            <div className="flex items-baseline justify-between gap-2 mb-1">
-                              <span
-                                className={`font-mono-tabular font-bold ${
-                                  health.isLow ? 'text-amber-900' : 'text-zinc-900'
-                                }`}
-                              >
-                                {it.quantity} {it.unit}
-                              </span>
-                              <span className="font-mono-tabular text-[11px] text-zinc-500">
-                                {health.fillPct}%
-                              </span>
-                            </div>
-                            <div
-                              role="progressbar"
-                              aria-valuenow={health.fillPct}
-                              aria-valuemin={0}
-                              aria-valuemax={100}
-                              aria-label={`${it.name} stock level ${it.quantity} ${it.unit} against ${it.minThreshold} ${it.unit} minimum threshold`}
-                              className={`w-full h-1.5 rounded-full overflow-hidden ${
-                                health.isLow ? 'bg-amber-200/70' : 'bg-zinc-100'
-                              }`}
-                            >
+                          <td className="px-4 py-3 min-w-[275px]">
+                            <div className="flex items-center gap-4">
+                              <div className="flex-1 min-w-[130px]">
+                                <div className="flex items-baseline justify-between gap-2 mb-1">
+                                  <span
+                                    className={`font-mono-tabular font-bold ${
+                                      health.isLow ? 'text-amber-900' : 'text-zinc-900'
+                                    }`}
+                                  >
+                                    {it.quantity} {it.unit}
+                                  </span>
+                                  <span className="font-mono-tabular text-[11px] text-zinc-500">
+                                    {health.fillPct}%
+                                  </span>
+                                </div>
+                                <div
+                                  role="progressbar"
+                                  aria-valuenow={health.fillPct}
+                                  aria-valuemin={0}
+                                  aria-valuemax={100}
+                                  aria-label={`${it.name} stock level ${it.quantity} ${it.unit} against ${it.minThreshold} ${it.unit} minimum threshold`}
+                                  className={`w-full h-1.5 rounded-full overflow-hidden ${
+                                    health.isLow ? 'bg-amber-200/70' : 'bg-zinc-100'
+                                  }`}
+                                >
+                                  <div
+                                    className={`h-full rounded-full transition-all duration-200 ${
+                                      health.isLow
+                                        ? 'bg-amber-600'
+                                        : health.isApproaching
+                                        ? 'bg-amber-400'
+                                        : 'bg-emerald-600'
+                                    }`}
+                                    style={{ width: `${health.fillPct}%` }}
+                                  />
+                                </div>
+                              </div>
+
                               <div
-                                className={`h-full rounded-full transition-all duration-200 ${
-                                  health.isLow
-                                    ? 'bg-amber-600'
-                                    : health.isApproaching
-                                    ? 'bg-amber-400'
-                                    : 'bg-emerald-600'
-                                }`}
-                                style={{ width: `${health.fillPct}%` }}
-                              />
+                                className="w-[100px] shrink-0"
+                                aria-label={`${it.name} last 7 days consumption sparkline: ${spark.total} ${it.unit} used`}
+                              >
+                                <div className="flex items-baseline justify-between gap-1 text-[10px] mb-0.5">
+                                  <span className="text-zinc-500">7d use</span>
+                                  <span className="font-mono-tabular font-semibold text-zinc-700">
+                                    {spark.total} {it.unit}
+                                  </span>
+                                </div>
+                                <div className="w-[96px] h-[26px]">
+                                  <AreaChart
+                                    width={96}
+                                    height={26}
+                                    data={spark.series}
+                                    margin={{ top: 3, right: 2, bottom: 2, left: 2 }}
+                                  >
+                                    <defs>
+                                      <linearGradient
+                                        id={`spark-${it.id}`}
+                                        x1="0"
+                                        y1="0"
+                                        x2="0"
+                                        y2="1"
+                                      >
+                                        <stop
+                                          offset="0%"
+                                          stopColor={sparkStroke}
+                                          stopOpacity={0.28}
+                                        />
+                                        <stop
+                                          offset="100%"
+                                          stopColor={sparkStroke}
+                                          stopOpacity={0.02}
+                                        />
+                                      </linearGradient>
+                                    </defs>
+                                    <XAxis dataKey="day" hide />
+                                    <YAxis
+                                      hide
+                                      domain={[0, (dataMax: number) => Math.max(dataMax, 1)]}
+                                    />
+                                    <Tooltip
+                                      cursor={{
+                                        stroke: '#D4AF37',
+                                        strokeWidth: 1,
+                                        strokeDasharray: '2 2',
+                                      }}
+                                      wrapperStyle={{ zIndex: 40, pointerEvents: 'none' }}
+                                      contentStyle={{
+                                        backgroundColor: '#141518',
+                                        border: '1px solid rgba(212, 175, 55, 0.35)',
+                                        borderRadius: 8,
+                                        padding: '4px 8px',
+                                        fontSize: 11,
+                                        color: '#FAFAFA',
+                                      }}
+                                      itemStyle={{ color: '#D4AF37', padding: 0 }}
+                                      labelStyle={{
+                                        color: '#A1A1AA',
+                                        fontSize: 10,
+                                        marginBottom: 1,
+                                      }}
+                                      formatter={(val) => [`${val} ${it.unit}`, 'Consumed']}
+                                    />
+                                    <Area
+                                      type="monotone"
+                                      dataKey="consumed"
+                                      stroke={sparkStroke}
+                                      strokeWidth={1.75}
+                                      fill={`url(#spark-${it.id})`}
+                                      dot={false}
+                                      activeDot={{
+                                        r: 2.5,
+                                        fill: '#141518',
+                                        stroke: sparkStroke,
+                                        strokeWidth: 1.5,
+                                      }}
+                                      isAnimationActive={false}
+                                    />
+                                  </AreaChart>
+                                </div>
+                              </div>
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right font-mono-tabular text-zinc-600">
@@ -557,8 +989,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             {health.isLow ? (
-                              <span className="inline-flex items-center gap-1.5 text-amber-800 font-semibold">
-                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-100 border border-amber-300 text-amber-900 text-[11px] font-semibold">
+                                <AlertTriangle className="w-3 h-3 text-amber-700 shrink-0" />
                                 <span>Low Stock</span>
                               </span>
                             ) : health.isApproaching ? (
@@ -677,15 +1109,47 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       {tab === 'suppliers' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {suppliers.map((s) => (
-            <div key={s.id} className="bg-white border border-zinc-200 rounded-xl p-5 space-y-2">
-              <div className="flex items-center gap-2 text-[#9A7415]">
-                <Truck className="w-4 h-4" />
-                <span className="text-xs font-semibold">{s.category}</span>
+            <div key={s.id} className="bg-white border border-zinc-200 rounded-xl p-5 space-y-2 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[#9A7415]">
+                    <Truck className="w-4 h-4 shrink-0" />
+                    <span className="text-xs font-semibold">{s.category}</span>
+                  </div>
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingSupplier({
+                          id: s.id,
+                          name: s.name,
+                          contactPerson: s.contactPerson || '',
+                          phone: s.phone || '',
+                          email: s.email || '',
+                          category: s.category || '',
+                          address: s.address || '',
+                          isNew: false,
+                        })
+                      }
+                      aria-label={`Edit ${s.name}`}
+                      className="px-2 py-1 rounded border border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                  )}
+                </div>
+                <h3 className="text-base font-bold text-zinc-900">{s.name}</h3>
+                <div className="text-xs text-zinc-600">Contact: {s.contactPerson || '—'}</div>
+                <div className="text-xs font-mono-tabular text-zinc-600">{s.phone || '—'}</div>
+                {s.email && (
+                  <div className="text-xs text-zinc-700 flex items-center gap-1.5 truncate">
+                    <Mail className="w-3.5 h-3.5 text-[#9A7415] shrink-0" />
+                    <span className="truncate">{s.email}</span>
+                  </div>
+                )}
+                <div className="text-xs text-zinc-500">{s.address}</div>
               </div>
-              <h3 className="text-base font-bold text-zinc-900">{s.name}</h3>
-              <div className="text-xs text-zinc-600">Contact: {s.contactPerson}</div>
-              <div className="text-xs font-mono-tabular text-zinc-600">{s.phone}</div>
-              <div className="text-xs text-zinc-500">{s.address}</div>
             </div>
           ))}
         </div>
@@ -905,18 +1369,46 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      {/* Add Supplier Modal */}
+      {/* Add / Edit Supplier Modal */}
       {editingSupplier && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              void saveSupplier(editingSupplier);
-              setEditingSupplier(null);
+              setSaving(true);
+              try {
+                await saveSupplier(editingSupplier);
+                showToast(
+                  editingSupplier.isNew
+                    ? `Supplier ${editingSupplier.name} added.`
+                    : `Updated supplier ${editingSupplier.name}.`
+                );
+                setEditingSupplier(null);
+              } catch (err) {
+                showToast(
+                  err instanceof Error ? err.message : 'Unable to save supplier.',
+                  'error'
+                );
+              } finally {
+                setSaving(false);
+              }
             }}
             className="w-full max-w-sm bg-white rounded-xl p-5 space-y-3 text-xs"
           >
-            <h3 className="text-sm font-bold">Add Supplier</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-1.5">
+                <Truck className="w-4 h-4 text-[#9A7415]" />
+                {editingSupplier.isNew ? 'Add Supplier' : 'Edit Supplier'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingSupplier(null)}
+                aria-label="Close supplier modal"
+                className="p-1 text-zinc-500 hover:text-zinc-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <input
               required
               placeholder="Supplier Company Name"
@@ -939,6 +1431,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               className="w-full px-3 py-2 rounded-lg border border-zinc-300"
             />
             <input
+              type="email"
+              placeholder="Supplier Email (for reorder drafts)"
+              value={editingSupplier.email || ''}
+              onChange={(e) => setEditingSupplier({ ...editingSupplier, email: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-zinc-300"
+            />
+            <input
               placeholder="Category"
               value={editingSupplier.category || ''}
               onChange={(e) =>
@@ -946,7 +1445,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               }
               className="w-full px-3 py-2 rounded-lg border border-zinc-300"
             />
-            <div className="flex justify-end gap-2">
+            <input
+              placeholder="Address"
+              value={editingSupplier.address || ''}
+              onChange={(e) =>
+                setEditingSupplier({ ...editingSupplier, address: e.target.value })
+              }
+              className="w-full px-3 py-2 rounded-lg border border-zinc-300"
+            />
+            <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setEditingSupplier(null)}
@@ -956,12 +1463,223 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 rounded-lg bg-[#141518] text-[#D4AF37] font-semibold cursor-pointer"
+                disabled={saving}
+                className="px-4 py-2 rounded-lg bg-[#141518] text-[#D4AF37] font-semibold cursor-pointer disabled:opacity-50"
               >
-                Save Supplier
+                {saving ? 'Saving...' : 'Save Supplier'}
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Send Critical Reorder to Supplier Modal */}
+      {reorderModalOpen && activeReorderGroup && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="send-supplier-title"
+            className="w-full max-w-2xl bg-white rounded-2xl border border-zinc-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          >
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-[#141518] text-white flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 rounded-lg bg-[#D4AF37]/15 text-[#D4AF37] shrink-0">
+                  <Send className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 id="send-supplier-title" className="text-sm font-bold text-white truncate">
+                    Send Immediate Reorder to Supplier
+                  </h3>
+                  <p className="text-[11px] text-zinc-400 truncate">
+                    Draft an email purchase order or dispatch an internal reorder notification
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReorderModalOpen(false)}
+                aria-label="Close send to supplier modal"
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Supplier Selector Tabs */}
+              <div>
+                <div className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide mb-2">
+                  Assigned Suppliers with Critical Stock ({supplierReorderGroups.length})
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {supplierReorderGroups.map((group) => {
+                    const isSelected = group.key === activeReorderGroup.key;
+                    return (
+                      <button
+                        key={group.key}
+                        type="button"
+                        onClick={() => selectSupplierGroup(group)}
+                        className={`px-3 py-2 rounded-lg border text-xs font-semibold inline-flex items-center gap-2 cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-[#141518] border-[#141518] text-[#D4AF37]'
+                            : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                        }`}
+                      >
+                        <Truck className="w-3.5 h-3.5 shrink-0" />
+                        <span>{group.supplierName}</span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-bold ${
+                            isSelected
+                              ? 'bg-[#D4AF37]/20 text-[#D4AF37]'
+                              : 'bg-amber-100 text-amber-900'
+                          }`}
+                        >
+                          {group.items.length}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Critical Items Preview for Selected Supplier */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-zinc-900">
+                    Items for {activeReorderGroup.supplierName}
+                  </span>
+                  <span className="font-mono-tabular font-bold text-amber-900">
+                    Est. Total: {formatINR(activeReorderGroup.estimatedTotal)}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {activeReorderGroup.items.map(({ item, reorderQty, lineEstimate }) => (
+                    <div
+                      key={item.id}
+                      className="bg-white border border-amber-200/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-zinc-900 truncate">{item.name}</div>
+                        <div className="text-[11px] text-zinc-500 font-mono-tabular">
+                          Now: {item.quantity} / Min: {item.minThreshold} {item.unit}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 font-mono-tabular">
+                        <div className="font-bold text-amber-900">
+                          +{reorderQty} {item.unit}
+                        </div>
+                        <div className="text-[10px] text-zinc-500">
+                          {formatINR(lineEstimate)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Supplier Contact & Email Field */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-zinc-500 font-semibold mb-1">
+                    Supplier Recipient Email
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="email"
+                      value={draftRecipientEmail}
+                      onChange={(e) => setDraftRecipientEmail(e.target.value)}
+                      placeholder="supplier@example.com"
+                      className="flex-1 px-3 py-2 rounded-lg border border-zinc-300 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#C59B27]"
+                    />
+                    {canManage &&
+                      activeReorderGroup.supplier &&
+                      draftRecipientEmail.trim().toLowerCase() !==
+                        (activeReorderGroup.supplier.email || '').trim().toLowerCase() && (
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveSupplierEmail()}
+                          className="px-2.5 py-2 rounded-lg border border-zinc-300 bg-zinc-50 hover:bg-zinc-100 text-[11px] font-semibold text-zinc-700 whitespace-nowrap cursor-pointer"
+                        >
+                          Save Email
+                        </button>
+                      )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-zinc-500 font-semibold mb-1">
+                    Supplier Contact Info
+                  </label>
+                  <div className="px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-700 font-mono-tabular truncate">
+                    {activeReorderGroup.supplier?.contactPerson || 'No contact name'} ·{' '}
+                    {activeReorderGroup.supplier?.phone || 'No phone on file'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Email Subject & Body */}
+              <div>
+                <label className="block text-zinc-500 font-semibold mb-1">Email Subject</label>
+                <input
+                  type="text"
+                  value={draftEmailSubject}
+                  onChange={(e) => setDraftEmailSubject(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-300 text-zinc-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#C59B27]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-500 font-semibold mb-1">
+                  Drafted Reorder Email Content
+                </label>
+                <textarea
+                  rows={8}
+                  value={draftEmailBody}
+                  onChange={(e) => setDraftEmailBody(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg border border-zinc-300 text-zinc-900 font-mono text-[11px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#C59B27]"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3.5 bg-zinc-50 border-t border-zinc-200 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => void handleCopyReorderDraft()}
+                className="px-3 py-2 rounded-lg border border-zinc-300 bg-white text-zinc-800 text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer hover:bg-zinc-100 transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>{copiedDraft ? 'Copied!' : 'Copy Email Draft'}</span>
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={`mailto:${encodeURIComponent(
+                    draftRecipientEmail.trim()
+                  )}?subject=${encodeURIComponent(
+                    draftEmailSubject
+                  )}&body=${encodeURIComponent(draftEmailBody)}`}
+                  className="px-3.5 py-2 rounded-lg border border-zinc-300 bg-white text-zinc-900 text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap hover:bg-zinc-100 transition-colors"
+                >
+                  <Mail className="w-3.5 h-3.5 text-[#9A7415]" />
+                  <span>Open Email Draft</span>
+                </a>
+
+                <button
+                  type="button"
+                  disabled={dispatchingReorder}
+                  onClick={() => void handleTriggerReorderNotification()}
+                  className="px-4 py-2 rounded-lg bg-[#141518] text-[#D4AF37] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>
+                    {dispatchingReorder ? 'Sending...' : 'Trigger Reorder Notification'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -24,6 +24,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings }) => {
     taxes: settings.taxes || [],
     paymentMethods: settings.paymentMethods || ['Cash', 'UPI', 'Card', 'Split', 'Room Folio'],
     googleReviewUrl: settings.googleReviewUrl || '',
+    whatsappNumber: settings.whatsappNumber || '',
+    googleMapsUrl: settings.googleMapsUrl || '',
     notificationsEnabled: settings.notificationsEnabled ?? true,
     requireCustomerLogin: settings.requireCustomerLogin ?? false,
   });
@@ -132,6 +134,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings }) => {
               <input
                 value={form.operatingHours}
                 onChange={(e) => setForm({ ...form, operatingHours: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-zinc-700 mb-1">
+                WhatsApp Contact Number
+              </label>
+              <input
+                value={form.whatsappNumber || ''}
+                onChange={(e) => setForm({ ...form, whatsappNumber: e.target.value })}
+                placeholder="+919431012345"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-300 font-mono-tabular"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-zinc-700 mb-1">
+                Google Maps Directions URL
+              </label>
+              <input
+                value={form.googleMapsUrl || ''}
+                onChange={(e) => setForm({ ...form, googleMapsUrl: e.target.value })}
+                placeholder="https://maps.google.com/?q=Hotel+Rudraksh+Inn+Deoghar"
                 className="w-full px-3 py-2 rounded-lg border border-zinc-300"
               />
             </div>

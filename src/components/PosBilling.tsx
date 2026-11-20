@@ -287,7 +287,7 @@ export const PosBilling: React.FC<PosBillingProps> = ({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[380px] overflow-y-auto">
                 {menuItems
-                  .filter((m) => m.available)
+                  .filter((m) => m.available && m.isVeg !== false)
                   .map((dish) => (
                     <button
                       key={dish.id}

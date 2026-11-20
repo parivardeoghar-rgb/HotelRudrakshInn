@@ -80,9 +80,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   });
 
   const [selectedCat, setSelectedCat] = useState<string>('all');
-  const [dietFilter, setDietFilter] = useState<'all' | 'veg' | 'nonveg' | 'bestseller'>(
-    customer.dietaryPreference || 'all'
-  );
+  const [dietFilter, setDietFilter] = useState<'all' | 'bestseller'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<OrderItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -102,8 +100,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [profName, setProfName] = useState(customer.displayName);
   const [profPhone, setProfPhone] = useState(customer.phone || '');
   const [profTable, setProfTable] = useState(customer.preferredTable || 'T1');
-  const [profDiet, setProfDiet] = useState<'all' | 'veg' | 'nonveg'>(
-    customer.dietaryPreference || 'all'
+  const [profDiet, setProfDiet] = useState<'all' | 'veg'>(
+    customer.dietaryPreference === 'veg' ? 'veg' : 'all'
   );
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -180,9 +178,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
+      if (item.isVeg === false) return false;
       if (selectedCat !== 'all' && item.categoryId !== selectedCat) return false;
-      if (dietFilter === 'veg' && !item.isVeg) return false;
-      if (dietFilter === 'nonveg' && item.isVeg) return false;
       if (dietFilter === 'bestseller' && !item.isBestseller) return false;
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -315,7 +312,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         preferredTable: profTable,
         dietaryPreference: profDiet,
       });
-      setDietFilter(profDiet);
       setSelectedTableId(profTable);
       showToast('Customer profile updated.');
     } catch {
@@ -386,7 +382,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         <div className="absolute inset-x-0 bottom-0 max-w-5xl mx-auto px-4 pb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#D4AF37]">
-              Customer Account Portal
+              100% Pure Vegetarian · Customer Portal
             </p>
             <h1 className="font-display text-xl sm:text-2xl font-semibold text-white">
               Order & Live Dining History
@@ -474,9 +470,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               <div className="flex items-center gap-1 p-1 bg-white border border-zinc-200 rounded-xl overflow-x-auto">
                 {(
                   [
-                    { id: 'all', label: 'All' },
-                    { id: 'veg', label: 'Pure Veg' },
-                    { id: 'nonveg', label: 'Non-Veg' },
+                    { id: 'all', label: 'All Pure Veg' },
                     { id: 'bestseller', label: 'Bestsellers' },
                   ] as const
                 ).map((f) => (
@@ -544,8 +538,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     <div className="flex-1 p-4 flex flex-col justify-between min-w-0">
                       <div>
                         <div className="flex items-center gap-2 text-xs text-zinc-500 mb-1">
-                          <span className={dish.isVeg ? 'text-emerald-700 font-medium' : 'text-red-700 font-medium'}>
-                            {dish.isVeg ? 'Veg' : 'Non-Veg'}
+                          <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+                            <span className="w-2.5 h-2.5 border border-emerald-700 flex items-center justify-center rounded-[2px]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-700" />
+                            </span>
+                            Pure Veg
                           </span>
                           {dish.isBestseller && (
                             <>
@@ -806,12 +803,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 </label>
                 <select
                   value={profDiet}
-                  onChange={(e) => setProfDiet(e.target.value as 'all' | 'veg' | 'nonveg')}
+                  onChange={(e) => setProfDiet(e.target.value as 'all' | 'veg')}
                   className="w-full px-3 py-2 rounded-lg border border-zinc-300"
                 >
-                  <option value="all">All Dishes</option>
+                  <option value="all">All Pure Veg Dishes</option>
                   <option value="veg">Pure Veg Only</option>
-                  <option value="nonveg">Non-Veg Only</option>
                 </select>
               </div>
               <div className="flex items-center justify-between pt-2">

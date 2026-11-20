@@ -69,7 +69,7 @@ export interface CustomerProfile {
   displayName: string;
   phone?: string;
   preferredTable?: string;
-  dietaryPreference?: 'all' | 'veg' | 'nonveg';
+  dietaryPreference?: 'all' | 'veg';
   active: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -260,6 +260,7 @@ export interface Supplier {
   name: string;
   contactPerson?: string;
   phone?: string;
+  email?: string;
   category?: string;
   address?: string;
   createdAt?: unknown;
@@ -287,6 +288,7 @@ export interface Feedback {
   overallRating: number;
   comment?: string;
   googleConsent: boolean;
+  approved?: boolean;
   createdAt?: unknown;
 }
 
@@ -300,6 +302,7 @@ export interface AppNotification {
     | 'bill_request'
     | 'waiter_call'
     | 'low_stock'
+    | 'supplier_reorder'
     | 'cancelled';
   title: string;
   message: string;
@@ -325,6 +328,8 @@ export interface HotelSettings {
   taxes: TaxComponent[];
   paymentMethods: string[];
   googleReviewUrl?: string;
+  whatsappNumber?: string;
+  googleMapsUrl?: string;
   notificationsEnabled?: boolean;
   requireCustomerLogin?: boolean;
   updatedAt?: unknown;

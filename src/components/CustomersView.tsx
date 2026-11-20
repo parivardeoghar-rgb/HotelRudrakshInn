@@ -102,11 +102,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                         </div>
                       </td>
                       <td className="px-4 py-3 text-zinc-600">
-                        {c.dietaryPreference === 'veg'
-                          ? 'Pure Veg'
-                          : c.dietaryPreference === 'nonveg'
-                          ? 'Non-Veg'
-                          : 'All'}
+                        {c.dietaryPreference === 'veg' ? 'Pure Veg' : 'All Pure Veg'}
                       </td>
                       <td className="px-4 py-3 text-right font-mono-tabular font-semibold">
                         {st.count}

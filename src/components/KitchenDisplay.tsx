@@ -187,8 +187,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({
                             {it.name}
                           </span>
                         </div>
-                        <span className="text-[11px] text-zinc-400 shrink-0 pt-1">
-                          {it.isVeg ? 'VEG' : 'NON-VEG'}
+                        <span className="text-[11px] font-semibold text-emerald-400 shrink-0 pt-1">
+                          PURE VEG
                         </span>
                       </div>
                     ))}

@@ -458,15 +458,16 @@ export async function updateCustomerProfile(
     displayName: string;
     phone?: string;
     preferredTable?: string;
-    dietaryPreference?: 'all' | 'veg' | 'nonveg';
+    dietaryPreference?: 'all' | 'veg';
   }
 ): Promise<void> {
   try {
+    const cleanDiet = updates.dietaryPreference === 'veg' ? 'veg' : 'all';
     await updateDoc(doc(db, 'customer_profiles', uid), {
       displayName: updates.displayName.trim().slice(0, 80),
       phone: (updates.phone || '').trim().slice(0, 20),
       preferredTable: (updates.preferredTable || '').trim().slice(0, 20),
-      dietaryPreference: updates.dietaryPreference || 'all',
+      dietaryPreference: cleanDiet,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -1318,7 +1319,7 @@ export async function saveMenuItem(
       price: Math.max(0, Number(item.price) || 0),
       categoryId: item.categoryId,
       categoryName: item.categoryName.slice(0, 60),
-      isVeg: Boolean(item.isVeg),
+      isVeg: true,
       isBestseller: Boolean(item.isBestseller),
       available: Boolean(item.available),
       imageUrl: (item.imageUrl || '').slice(0, 150000),
@@ -1443,27 +1444,75 @@ export async function recordStockMovement(params: {
 export async function saveSupplier(sup: Omit<Supplier, 'createdAt'> & { isNew?: boolean }): Promise<void> {
   const id = sup.isNew ? createDocId('sup') : sup.id;
   try {
+    const payload = {
+      name: sup.name.trim().slice(0, 80),
+      contactPerson: (sup.contactPerson || '').trim().slice(0, 80),
+      phone: (sup.phone || '').trim().slice(0, 25),
+      email: (sup.email || '').trim().toLowerCase().slice(0, 120),
+      category: (sup.category || '').trim().slice(0, 50),
+      address: (sup.address || '').trim().slice(0, 200),
+    };
     if (sup.isNew) {
       await setDoc(doc(db, 'suppliers', id), {
         id,
-        name: sup.name.trim().slice(0, 80),
-        contactPerson: (sup.contactPerson || '').trim().slice(0, 80),
-        phone: (sup.phone || '').trim().slice(0, 25),
-        category: (sup.category || '').trim().slice(0, 50),
-        address: (sup.address || '').trim().slice(0, 200),
+        ...payload,
         createdAt: serverTimestamp(),
       });
     } else {
-      await updateDoc(doc(db, 'suppliers', id), {
-        name: sup.name.trim().slice(0, 80),
-        contactPerson: (sup.contactPerson || '').trim().slice(0, 80),
-        phone: (sup.phone || '').trim().slice(0, 25),
-        category: (sup.category || '').trim().slice(0, 50),
-        address: (sup.address || '').trim().slice(0, 200),
-      });
+      await updateDoc(doc(db, 'suppliers', id), payload);
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `suppliers/${id}`);
+  }
+}
+
+export async function dispatchSupplierReorderNotification(params: {
+  supplierId?: string;
+  supplierName: string;
+  recipientEmail?: string;
+  itemNames: string[];
+  estimatedCost: number;
+  actor: StaffProfile;
+}): Promise<string> {
+  const notifId = createDocId('notif');
+  const count = params.itemNames.length;
+  const cleanSupplier = params.supplierName.trim().slice(0, 50) || 'Supplier';
+  const title = `Reorder Sent · ${cleanSupplier}`.slice(0, 100);
+  const itemsPreview = params.itemNames.slice(0, 4).join(', ');
+  const overflow = count > 4 ? ` +${count - 4} more` : '';
+  const emailSuffix = params.recipientEmail?.trim()
+    ? ` (${params.recipientEmail.trim()})`
+    : '';
+  const rawMessage = `${count} low-stock ${count === 1 ? 'item' : 'items'} dispatched to ${cleanSupplier}${emailSuffix}: ${itemsPreview}${overflow}.`;
+  const message = rawMessage.slice(0, 250);
+
+  try {
+    await setDoc(doc(db, 'notifications', notifId), {
+      id: notifId,
+      type: 'supplier_reorder',
+      title,
+      message,
+      targetRoles: ['super_admin', 'manager', 'kitchen'],
+      ...(params.supplierId ? { relatedId: params.supplierId.slice(0, 128) } : {}),
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+
+    if (params.actor.role === 'super_admin' || params.actor.role === 'manager') {
+      await recordAuditLog({
+        action: 'SUPPLIER_REORDER_DISPATCHED',
+        actorUid: params.actor.uid,
+        actorName: params.actor.displayName,
+        actorRole: params.actor.role,
+        targetType: 'supplier',
+        ...(params.supplierId ? { targetId: params.supplierId } : {}),
+        summary: `Dispatched reorder alert for ${count} critical items to ${cleanSupplier}${emailSuffix} (Est. ₹${Math.round(params.estimatedCost)})`,
+      });
+    }
+
+    return notifId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `notifications/${notifId}`);
   }
 }
 
@@ -1532,6 +1581,7 @@ export async function submitGuestFeedback(
       ambianceRating: Math.min(5, Math.max(1, Number(data.ambianceRating) || 5)),
       overallRating: Math.min(5, Math.max(1, Number(data.overallRating) || 5)),
       googleConsent: Boolean(data.googleConsent),
+      approved: false,
       createdAt: serverTimestamp(),
     };
     if (data.orderId) payload.orderId = data.orderId;
@@ -1542,6 +1592,25 @@ export async function submitGuestFeedback(
     await setDoc(doc(db, 'feedback', id), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `feedback/${id}`);
+  }
+}
+
+export async function setFeedbackApproval(
+  feedbackId: string,
+  approved: boolean
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'feedback', feedbackId), { approved });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `feedback/${feedbackId}`);
+  }
+}
+
+export async function deleteFeedback(feedbackId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'feedback', feedbackId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `feedback/${feedbackId}`);
   }
 }
 

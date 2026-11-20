@@ -286,7 +286,7 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
 
             <div className="divide-y divide-zinc-100 max-h-60 overflow-y-auto border border-zinc-200 rounded-lg px-3">
               {menuItems
-                .filter((m) => m.available)
+                .filter((m) => m.available && m.isVeg !== false)
                 .map((dish) => {
                   const qty = items.find((i) => i.itemId === dish.id)?.qty || 0;
                   return (

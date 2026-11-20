@@ -52,6 +52,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AppShell, getEffectiveAllowedModules } from './components/AppShell';
 import { AuditLogsView } from './components/AuditLogsView';
 import { CustomerDashboard } from './components/CustomerDashboard';
+import { CustomerHomepage } from './components/CustomerHomepage';
 import { CustomersView } from './components/CustomersView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FeedbackView } from './components/FeedbackView';
@@ -70,6 +71,7 @@ import { TableManagement } from './components/TableManagement';
 import { WaiterDashboard } from './components/WaiterDashboard';
 
 type RouteState =
+  | { view: 'home' }
   | { view: 'selector' }
   | { view: 'login'; portal: PortalKey }
   | { view: 'dashboard'; portal: PortalKey };
@@ -94,13 +96,16 @@ const DASHBOARD_ROUTES: Record<string, PortalKey> = {
 
 function parsePathname(pathname: string): RouteState {
   const clean = pathname.replace(/\/+$/, '') || '/';
+  if (clean === '/portals') {
+    return { view: 'selector' };
+  }
   if (LOGIN_ROUTES[clean]) {
     return { view: 'login', portal: LOGIN_ROUTES[clean] };
   }
   if (DASHBOARD_ROUTES[clean]) {
     return { view: 'dashboard', portal: DASHBOARD_ROUTES[clean] };
   }
-  return { view: 'selector' };
+  return { view: 'home' };
 }
 
 function getQueryTable(): string | null {
@@ -132,7 +137,7 @@ function AppContent() {
 
   const [guestTableId, setGuestTableId] = useState<string | null>(() => {
     const parsed = parsePathname(window.location.pathname);
-    return parsed.view === 'selector' ? getQueryTable() : null;
+    return parsed.view === 'home' || parsed.view === 'selector' ? getQueryTable() : null;
   });
   const [returnTableAfterCustomerLogin, setReturnTableAfterCustomerLogin] = useState<
     string | null
@@ -182,7 +187,7 @@ function AppContent() {
       setRoute(nextRoute);
       const qTable = new URLSearchParams(targetUrl.search).get('table');
       setReturnTableAfterCustomerLogin(qTable ? sanitizeId(qTable) : null);
-      if (nextRoute.view === 'selector' && qTable) {
+      if ((nextRoute.view === 'home' || nextRoute.view === 'selector') && qTable) {
         setGuestTableId(sanitizeId(qTable));
       } else {
         setGuestTableId(null);
@@ -199,7 +204,7 @@ function AppContent() {
       setRoute(next);
       const qTbl = getQueryTable();
       setReturnTableAfterCustomerLogin(qTbl);
-      setGuestTableId(next.view === 'selector' ? qTbl : null);
+      setGuestTableId(next.view === 'home' || next.view === 'selector' ? qTbl : null);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -546,7 +551,7 @@ function AppContent() {
         requireCustomerLogin={settings.requireCustomerLogin}
         onBackToPortals={() => {
           setAuthError(null);
-          navigateTo('/');
+          navigateTo(route.portal === 'customer' ? '/' : '/portals');
         }}
         onAuthenticated={handlePortalAuthenticated}
         onOpenGuestMenu={(tableId) => {
@@ -637,7 +642,7 @@ function AppContent() {
           requireCustomerLogin={settings.requireCustomerLogin}
           onBackToPortals={() => {
             setAuthError(null);
-            navigateTo('/');
+            navigateTo('/portals');
           }}
           onAuthenticated={handlePortalAuthenticated}
           onOpenGuestMenu={(tableId) => {
@@ -800,7 +805,14 @@ function AppContent() {
           <ReportsView orders={orders} bills={bills} inventory={inventory} />
         )}
 
-        {currentModule === 'feedback' && <FeedbackView feedback={feedback} />}
+        {currentModule === 'feedback' && (
+          <FeedbackView
+            feedback={feedback}
+            canModerate={
+              staffProfile.role === 'super_admin' || staffProfile.role === 'manager'
+            }
+          />
+        )}
 
         {currentModule === 'customers' && staffProfile.role === 'super_admin' && (
           <CustomersView
@@ -829,26 +841,55 @@ function AppContent() {
     );
   }
 
-  // 6. Root Portal Selection Page (/)
+  // 6. Multi-Portal Selector Page (/portals)
+  if (route.view === 'selector') {
+    return (
+      <PortalSelectorView
+        requireCustomerLogin={settings.requireCustomerLogin}
+        onBackToHome={() => navigateTo('/')}
+        onSelectPortal={(portal) => {
+          setAuthError(null);
+          if (portal === 'customer' && customerProfile) {
+            navigateTo('/customer/dashboard');
+            return;
+          }
+          if (staffProfile && ROLE_TO_PORTAL[staffProfile.role] === portal) {
+            navigateTo(`/${portal}/dashboard`);
+            return;
+          }
+          navigateTo(`/${portal}/login`);
+        }}
+        onOpenGuestMenu={(tableId) => {
+          setGuestTableId(tableId);
+          navigateTo(`/?table=${tableId}`);
+        }}
+      />
+    );
+  }
+
+  // 7. Customer Homepage (/)
   return (
-    <PortalSelectorView
-      requireCustomerLogin={settings.requireCustomerLogin}
-      onSelectPortal={(portal) => {
+    <CustomerHomepage
+      customerProfile={customerProfile}
+      onOpenCustomerPortal={() => {
         setAuthError(null);
-        // If user is already verified for the chosen portal, take them straight to their dashboard
-        if (portal === 'customer' && customerProfile) {
+        if (customerProfile) {
           navigateTo('/customer/dashboard');
-          return;
+        } else {
+          navigateTo('/customer/login');
         }
-        if (staffProfile && ROLE_TO_PORTAL[staffProfile.role] === portal) {
-          navigateTo(`/${portal}/dashboard`);
-          return;
-        }
-        navigateTo(`/${portal}/login`);
       }}
-      onOpenGuestMenu={(tableId) => {
+      onOpenStaffPortals={() => {
+        setAuthError(null);
+        navigateTo('/portals');
+      }}
+      onOpenGuestQrMenu={(tableId) => {
         setGuestTableId(tableId);
         navigateTo(`/?table=${tableId}`);
+      }}
+      onRequestCustomerLogin={(tableId) => {
+        setAuthError(null);
+        navigateTo(tableId ? `/customer/login?table=${tableId}` : '/customer/login');
       }}
     />
   );

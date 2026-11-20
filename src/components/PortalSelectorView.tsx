@@ -16,6 +16,7 @@ import { BAIDYANATH_MEDIA_LOGO, type PortalKey } from '../types';
 interface PortalSelectorViewProps {
   onSelectPortal: (portal: PortalKey) => void;
   onOpenGuestMenu: (tableId: string) => void;
+  onBackToHome?: () => void;
   requireCustomerLogin?: boolean;
 }
 
@@ -94,6 +95,7 @@ const PORTAL_CARDS: {
 export const PortalSelectorView: React.FC<PortalSelectorViewProps> = ({
   onSelectPortal,
   onOpenGuestMenu,
+  onBackToHome,
   requireCustomerLogin,
 }) => {
   const [previewTable, setPreviewTable] = useState('T1');
@@ -117,16 +119,27 @@ export const PortalSelectorView: React.FC<PortalSelectorViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5">
-            <img
-              src={BAIDYANATH_MEDIA_LOGO}
-              alt="Baidyanath Media Agency Logo"
-              className="w-8 h-8 rounded-lg object-cover bg-[#F4F1EA]"
-            />
-            <div className="text-left">
-              <div className="text-[11px] text-zinc-400 leading-none">Software by</div>
-              <div className="text-xs font-semibold text-[#D4AF37] mt-0.5">
-                Baidyanath Media Agency
+          <div className="flex flex-wrap items-center gap-3">
+            {onBackToHome && (
+              <button
+                type="button"
+                onClick={onBackToHome}
+                className="px-3.5 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-semibold text-zinc-200 transition-colors cursor-pointer"
+              >
+                Back to Homepage
+              </button>
+            )}
+            <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5">
+              <img
+                src={BAIDYANATH_MEDIA_LOGO}
+                alt="Baidyanath Media Agency Logo"
+                className="w-8 h-8 rounded-lg object-cover bg-[#F4F1EA]"
+              />
+              <div className="text-left">
+                <div className="text-[11px] text-zinc-400 leading-none">Software by</div>
+                <div className="text-xs font-semibold text-[#D4AF37] mt-0.5">
+                  Baidyanath Media Agency
+                </div>
               </div>
             </div>
           </div>
