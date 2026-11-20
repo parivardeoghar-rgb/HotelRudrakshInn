@@ -1,0 +1,748 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Pillar 4.1: Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // Global Hardened Primitives
+    // ------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified() && request.auth.token.email == 'parivardeoghar@gmail.com';
+    }
+
+    function isOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+
+    function staffProfileExists() {
+      return isVerified() && exists(/databases/$(database)/documents/staff_profiles/$(request.auth.uid));
+    }
+
+    function staffProfile() {
+      return get(/databases/$(database)/documents/staff_profiles/$(request.auth.uid)).data;
+    }
+
+    function isActiveStaff() {
+      return isBootstrappedAdmin() || (staffProfileExists() && staffProfile().active == true);
+    }
+
+    function hasRole(allowedRoles) {
+      return isBootstrappedAdmin() || (isActiveStaff() && staffProfile().role in allowedRoles);
+    }
+
+    function isAdmin() {
+      return hasRole(['super_admin']);
+    }
+
+    function isAdminOrManager() {
+      return hasRole(['super_admin', 'manager']);
+    }
+
+    function isValidRole(role) {
+      return role in ['super_admin', 'manager', 'cashier', 'waiter', 'kitchen'];
+    }
+
+    function isNum(val) {
+      return val is int || val is float;
+    }
+
+    // ------------------------------------------------------------------
+    // Entity Validation Blueprints (Pillar 2: Anti-Update-Gap)
+    // ------------------------------------------------------------------
+    function isValidStaffProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'active', 'phone', 'shift', 'inviteId', 'permissions', 'lastLoginAt', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        isValidRole(data.role) &&
+        data.active is bool &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
+        (!('shift' in data) || (data.shift is string && data.shift.size() <= 40)) &&
+        (!('inviteId' in data) || (data.inviteId is string && data.inviteId.size() <= 128)) &&
+        (!('permissions' in data) || (data.permissions is list && data.permissions.size() <= 16 && (data.permissions.size() == 0 || data.permissions[0] is string))) &&
+        (!('lastLoginAt' in data) || data.lastLoginAt is timestamp) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStaffInvite(data) {
+      return data.keys().hasAll(['inviteId', 'email', 'displayName', 'role', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['inviteId', 'email', 'displayName', 'role', 'active', 'phone', 'shift', 'permissions', 'createdBy', 'createdAt', 'updatedAt']) &&
+        isValidId(data.inviteId) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        isValidRole(data.role) &&
+        data.active is bool &&
+        data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
+        (!('shift' in data) || (data.shift is string && data.shift.size() <= 40)) &&
+        (!('permissions' in data) || (data.permissions is list && data.permissions.size() <= 16 && (data.permissions.size() == 0 || data.permissions[0] is string))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCustomerProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'phone', 'preferredTable', 'dietaryPreference', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
+        (!('preferredTable' in data) || (data.preferredTable is string && data.preferredTable.size() <= 20)) &&
+        (!('dietaryPreference' in data) || data.dietaryPreference in ['all', 'veg', 'nonveg']) &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'action', 'actorUid', 'actorName', 'actorRole', 'targetType', 'summary', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'action', 'actorUid', 'actorName', 'actorRole', 'targetType', 'targetId', 'summary', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+        data.actorUid is string && data.actorUid.size() >= 1 && data.actorUid.size() <= 128 &&
+        data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80 &&
+        data.actorRole is string && data.actorRole.size() >= 1 && data.actorRole.size() <= 32 &&
+        data.targetType is string && data.targetType.size() >= 1 && data.targetType.size() <= 40 &&
+        (!('targetId' in data) || (data.targetId is string && data.targetId.size() <= 128)) &&
+        data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 300 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidTable(data) {
+      return data.keys().hasAll(['id', 'tableNumber', 'name', 'section', 'capacity', 'status', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'tableNumber', 'name', 'section', 'capacity', 'status', 'currentOrderId', 'currentBillTotal', 'assignedWaiterId', 'assignedWaiterName', 'orderTime', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.tableNumber is string && data.tableNumber.size() >= 1 && data.tableNumber.size() <= 20 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 50 &&
+        data.section is string && data.section.size() >= 1 && data.section.size() <= 50 &&
+        isNum(data.capacity) && data.capacity >= 1 && data.capacity <= 30 &&
+        data.status in ['Available', 'Occupied', 'Ordered', 'Preparing', 'Ready', 'Served', 'Billing'] &&
+        (!('currentOrderId' in data) || (data.currentOrderId is string && data.currentOrderId.size() <= 128)) &&
+        (!('currentBillTotal' in data) || (isNum(data.currentBillTotal) && data.currentBillTotal >= 0)) &&
+        (!('assignedWaiterId' in data) || (data.assignedWaiterId is string && data.assignedWaiterId.size() <= 128)) &&
+        (!('assignedWaiterName' in data) || (data.assignedWaiterName is string && data.assignedWaiterName.size() <= 80)) &&
+        (!('orderTime' in data) || data.orderTime is timestamp || data.orderTime == null) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMenuCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'sortOrder', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'sortOrder', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+        isNum(data.sortOrder) && data.sortOrder >= 0 && data.sortOrder <= 1000 &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['id', 'name', 'description', 'price', 'categoryId', 'categoryName', 'isVeg', 'isBestseller', 'available', 'sortOrder', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'description', 'price', 'categoryId', 'categoryName', 'isVeg', 'isBestseller', 'available', 'imageUrl', 'sortOrder', 'prepTimeMins', 'recipe', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.description is string && data.description.size() <= 400 &&
+        isNum(data.price) && data.price >= 0 && data.price <= 100000 &&
+        data.categoryId is string && data.categoryId.size() >= 1 && data.categoryId.size() <= 64 &&
+        data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 60 &&
+        data.isVeg is bool &&
+        data.isBestseller is bool &&
+        data.available is bool &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 150000)) &&
+        isNum(data.sortOrder) && data.sortOrder >= 0 && data.sortOrder <= 2000 &&
+        (!('prepTimeMins' in data) || (isNum(data.prepTimeMins) && data.prepTimeMins >= 0 && data.prepTimeMins <= 240)) &&
+        (!('recipe' in data) || (data.recipe is list && data.recipe.size() <= 20 && (data.recipe.size() == 0 || data.recipe[0] is map))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'orderNumber', 'source', 'status', 'priority', 'items', 'subtotal', 'billed', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'orderNumber', 'source', 'tableId', 'tableNumber', 'roomNumber', 'guestName', 'guestSessionId', 'customerId', 'waiterId', 'waiterName', 'status', 'priority', 'items', 'specialInstructions', 'subtotal', 'billed', 'billId', 'inventoryDeducted', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.orderNumber is string && data.orderNumber.size() >= 1 && data.orderNumber.size() <= 32 &&
+        data.source in ['qr', 'waiter', 'pos', 'room_service'] &&
+        (!('tableId' in data) || (data.tableId is string && data.tableId.size() <= 64)) &&
+        (!('tableNumber' in data) || (data.tableNumber is string && data.tableNumber.size() <= 20)) &&
+        (!('roomNumber' in data) || (data.roomNumber is string && data.roomNumber.size() <= 20)) &&
+        (!('guestName' in data) || (data.guestName is string && data.guestName.size() <= 80)) &&
+        (!('guestSessionId' in data) || (data.guestSessionId is string && data.guestSessionId.size() <= 128)) &&
+        (!('customerId' in data) || (data.customerId is string && data.customerId.size() <= 128)) &&
+        (!('waiterId' in data) || (data.waiterId is string && data.waiterId.size() <= 128)) &&
+        (!('waiterName' in data) || (data.waiterName is string && data.waiterName.size() <= 80)) &&
+        data.status in ['New', 'Accepted', 'Preparing', 'Ready', 'Served', 'Completed', 'Cancelled'] &&
+        data.priority in ['Normal', 'Urgent'] &&
+        data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map &&
+        (!('specialInstructions' in data) || (data.specialInstructions is string && data.specialInstructions.size() <= 300)) &&
+        isNum(data.subtotal) && data.subtotal >= 0 && data.subtotal <= 1000000 &&
+        data.billed is bool &&
+        (!('billId' in data) || (data.billId is string && data.billId.size() <= 128)) &&
+        (!('inventoryDeducted' in data) || data.inventoryDeducted is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBill(data) {
+      return data.keys().hasAll(['id', 'invoiceNumber', 'items', 'subtotal', 'discountAmount', 'taxAmount', 'totalAmount', 'paymentStatus', 'paymentMethod', 'cashierId', 'cashierName', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'invoiceNumber', 'orderId', 'orderNumber', 'source', 'tableId', 'tableNumber', 'roomNumber', 'guestName', 'items', 'subtotal', 'discountType', 'discountValue', 'discountAmount', 'taxBreakdown', 'taxAmount', 'totalAmount', 'paymentStatus', 'paymentMethod', 'splitPayments', 'cashierId', 'cashierName', 'cancelReason', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40 &&
+        (!('orderId' in data) || (data.orderId is string && data.orderId.size() <= 128)) &&
+        (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 32)) &&
+        (!('source' in data) || data.source in ['qr', 'waiter', 'pos', 'room_service']) &&
+        (!('tableId' in data) || (data.tableId is string && data.tableId.size() <= 64)) &&
+        (!('tableNumber' in data) || (data.tableNumber is string && data.tableNumber.size() <= 20)) &&
+        (!('roomNumber' in data) || (data.roomNumber is string && data.roomNumber.size() <= 20)) &&
+        (!('guestName' in data) || (data.guestName is string && data.guestName.size() <= 80)) &&
+        data.items is list && data.items.size() >= 1 && data.items.size() <= 50 && data.items[0] is map &&
+        isNum(data.subtotal) && data.subtotal >= 0 &&
+        (!('discountType' in data) || data.discountType in ['none', 'flat', 'percent']) &&
+        (!('discountValue' in data) || (isNum(data.discountValue) && data.discountValue >= 0)) &&
+        isNum(data.discountAmount) && data.discountAmount >= 0 &&
+        (!('taxBreakdown' in data) || (data.taxBreakdown is list && data.taxBreakdown.size() <= 10 && (data.taxBreakdown.size() == 0 || data.taxBreakdown[0] is map))) &&
+        isNum(data.taxAmount) && data.taxAmount >= 0 &&
+        isNum(data.totalAmount) && data.totalAmount >= 0 &&
+        data.paymentStatus in ['Paid', 'Unpaid', 'Cancelled', 'Folio'] &&
+        data.paymentMethod in ['Cash', 'UPI', 'Card', 'Split', 'Room Folio', 'Pending'] &&
+        (!('splitPayments' in data) || (data.splitPayments is list && data.splitPayments.size() <= 5 && (data.splitPayments.size() == 0 || data.splitPayments[0] is map))) &&
+        data.cashierId is string && data.cashierId.size() >= 1 && data.cashierId.size() <= 128 &&
+        data.cashierName is string && data.cashierName.size() >= 1 && data.cashierName.size() <= 80 &&
+        (!('cancelReason' in data) || (data.cancelReason is string && data.cancelReason.size() <= 250)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidRoomFolio(data) {
+      return data.keys().hasAll(['id', 'roomNumber', 'guestName', 'status', 'orderIds', 'totalAmount', 'paidAmount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'roomNumber', 'guestName', 'guestPhone', 'checkInRef', 'status', 'orderIds', 'totalAmount', 'paidAmount', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.roomNumber is string && data.roomNumber.size() >= 1 && data.roomNumber.size() <= 20 &&
+        data.guestName is string && data.guestName.size() >= 1 && data.guestName.size() <= 80 &&
+        (!('guestPhone' in data) || (data.guestPhone is string && data.guestPhone.size() <= 20)) &&
+        (!('checkInRef' in data) || (data.checkInRef is string && data.checkInRef.size() <= 40)) &&
+        data.status in ['Active', 'Settled'] &&
+        data.orderIds is list && data.orderIds.size() <= 50 && (data.orderIds.size() == 0 || data.orderIds[0] is string) &&
+        isNum(data.totalAmount) && data.totalAmount >= 0 &&
+        isNum(data.paidAmount) && data.paidAmount >= 0 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidInventoryItem(data) {
+      return data.keys().hasAll(['id', 'name', 'category', 'quantity', 'unit', 'minThreshold', 'unitCost', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'category', 'quantity', 'unit', 'minThreshold', 'unitCost', 'supplierId', 'supplierName', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 50 &&
+        isNum(data.quantity) && data.quantity >= 0 &&
+        data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 20 &&
+        isNum(data.minThreshold) && data.minThreshold >= 0 &&
+        isNum(data.unitCost) && data.unitCost >= 0 &&
+        (!('supplierId' in data) || (data.supplierId is string && data.supplierId.size() <= 64)) &&
+        (!('supplierName' in data) || (data.supplierName is string && data.supplierName.size() <= 80)) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidInventoryLog(data) {
+      return data.keys().hasAll(['id', 'itemId', 'itemName', 'type', 'quantityDelta', 'unit', 'performedBy', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'itemId', 'itemName', 'type', 'quantityDelta', 'unit', 'note', 'performedBy', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.itemId is string && data.itemId.size() >= 1 && data.itemId.size() <= 64 &&
+        data.itemName is string && data.itemName.size() >= 1 && data.itemName.size() <= 80 &&
+        data.type in ['purchase', 'consumption', 'adjustment'] &&
+        isNum(data.quantityDelta) &&
+        data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 20 &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 200)) &&
+        data.performedBy is string && data.performedBy.size() >= 1 && data.performedBy.size() <= 80 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['id', 'name', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'contactPerson', 'phone', 'category', 'address', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 80)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 25)) &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 50)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 200)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidServiceRequest(data) {
+      return data.keys().hasAll(['id', 'tableId', 'tableNumber', 'type', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'tableId', 'tableNumber', 'type', 'status', 'note', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.tableId is string && data.tableId.size() >= 1 && data.tableId.size() <= 64 &&
+        data.tableNumber is string && data.tableNumber.size() >= 1 && data.tableNumber.size() <= 20 &&
+        data.type in ['call_waiter', 'request_bill'] &&
+        data.status in ['Pending', 'Resolved'] &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 200)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll(['id', 'foodRating', 'serviceRating', 'ambianceRating', 'overallRating', 'googleConsent', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'orderId', 'orderNumber', 'tableNumber', 'guestName', 'foodRating', 'serviceRating', 'ambianceRating', 'overallRating', 'comment', 'googleConsent', 'createdAt']) &&
+        isValidId(data.id) &&
+        (!('orderId' in data) || (data.orderId is string && data.orderId.size() <= 128)) &&
+        (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 32)) &&
+        (!('tableNumber' in data) || (data.tableNumber is string && data.tableNumber.size() <= 20)) &&
+        (!('guestName' in data) || (data.guestName is string && data.guestName.size() <= 80)) &&
+        isNum(data.foodRating) && data.foodRating >= 1 && data.foodRating <= 5 &&
+        isNum(data.serviceRating) && data.serviceRating >= 1 && data.serviceRating <= 5 &&
+        isNum(data.ambianceRating) && data.ambianceRating >= 1 && data.ambianceRating <= 5 &&
+        isNum(data.overallRating) && data.overallRating >= 1 && data.overallRating <= 5 &&
+        (!('comment' in data) || (data.comment is string && data.comment.size() <= 500)) &&
+        data.googleConsent is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'type', 'title', 'message', 'targetRoles', 'read', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'type', 'title', 'message', 'targetRoles', 'relatedId', 'read', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.type in ['qr_order', 'waiter_order', 'kitchen_update', 'order_ready', 'bill_request', 'waiter_call', 'low_stock', 'cancelled'] &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 250 &&
+        data.targetRoles is list && data.targetRoles.size() >= 1 && data.targetRoles.size() <= 5 && data.targetRoles[0] is string &&
+        (!('relatedId' in data) || (data.relatedId is string && data.relatedId.size() <= 128)) &&
+        data.read is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidHotelSettings(data) {
+      return data.keys().hasAll(['id', 'hotelName', 'currency', 'taxes', 'paymentMethods', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'hotelName', 'tagline', 'address', 'phone', 'email', 'gstin', 'currency', 'upiId', 'invoicePrefix', 'invoiceFooter', 'operatingHours', 'taxes', 'paymentMethods', 'googleReviewUrl', 'notificationsEnabled', 'requireCustomerLogin', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.hotelName is string && data.hotelName.size() >= 1 && data.hotelName.size() <= 100 &&
+        (!('tagline' in data) || (data.tagline is string && data.tagline.size() <= 120)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 250)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 30)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 100)) &&
+        (!('gstin' in data) || (data.gstin is string && data.gstin.size() <= 30)) &&
+        data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10 &&
+        (!('upiId' in data) || (data.upiId is string && data.upiId.size() <= 80)) &&
+        (!('invoicePrefix' in data) || (data.invoicePrefix is string && data.invoicePrefix.size() <= 20)) &&
+        (!('invoiceFooter' in data) || (data.invoiceFooter is string && data.invoiceFooter.size() <= 250)) &&
+        (!('operatingHours' in data) || (data.operatingHours is string && data.operatingHours.size() <= 100)) &&
+        data.taxes is list && data.taxes.size() <= 6 && (data.taxes.size() == 0 || data.taxes[0] is map) &&
+        data.paymentMethods is list && data.paymentMethods.size() >= 1 && data.paymentMethods.size() <= 8 && data.paymentMethods[0] is string &&
+        (!('googleReviewUrl' in data) || (data.googleReviewUrl is string && data.googleReviewUrl.size() <= 300)) &&
+        (!('notificationsEnabled' in data) || data.notificationsEnabled is bool) &&
+        (!('requireCustomerLogin' in data) || data.requireCustomerLogin is bool) &&
+        data.updatedAt is timestamp;
+    }
+
+    // ------------------------------------------------------------------
+    // Collection Rules
+    // ------------------------------------------------------------------
+
+    // 1. Staff Profiles (PII Protected)
+    match /staff_profiles/{userId} {
+      allow get: if isValidId(userId) && isVerified() && (isOwner(userId) || isAdminOrManager());
+      allow list: if isVerified() && (isAdminOrManager() || existing().uid == request.auth.uid);
+
+      allow create: if isValidId(userId) && isVerified() && isValidStaffProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isBootstrappedAdmin() ||
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            'inviteId' in incoming() &&
+            isValidId(incoming().inviteId) &&
+            exists(/databases/$(database)/documents/staff_invites/$(incoming().inviteId)) &&
+            get(/databases/$(database)/documents/staff_invites/$(incoming().inviteId)).data.email == request.auth.token.email &&
+            get(/databases/$(database)/documents/staff_invites/$(incoming().inviteId)).data.active == true &&
+            incoming().role == get(/databases/$(database)/documents/staff_invites/$(incoming().inviteId)).data.role &&
+            (!('permissions' in incoming()) || ('permissions' in get(/databases/$(database)/documents/staff_invites/$(incoming().inviteId)).data && incoming().permissions == get(/databases/$(database)/documents/staff_invites/$(incoming().inviteId)).data.permissions)) &&
+            incoming().active == true
+          )
+        );
+
+      allow update: if isValidId(userId) && isVerified() && isValidStaffProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'lastLoginAt', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(userId) && isAdmin() && userId != request.auth.uid;
+    }
+
+    // 2. Staff Invites / Directory (PII Protected)
+    match /staff_invites/{inviteId} {
+      allow get: if isValidId(inviteId) && isVerified() && (
+        isAdminOrManager() ||
+        existing().email == request.auth.token.email
+      );
+      allow list: if isVerified() && (isAdminOrManager() || existing().email == request.auth.token.email);
+
+      allow create: if isValidId(inviteId) && isAdmin() && isValidStaffInvite(incoming()) &&
+        incoming().inviteId == inviteId &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(inviteId) && isAdmin() && isValidStaffInvite(incoming()) &&
+        incoming().inviteId == existing().inviteId &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(inviteId) && isAdmin();
+    }
+
+    // 3. Restaurant Tables
+    match /tables/{tableId} {
+      allow get: if isValidId(tableId);
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(tableId) && isAdminOrManager() && isValidTable(incoming()) &&
+        incoming().id == tableId &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(tableId) && isValidTable(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().updatedAt == request.time && (
+          isAdminOrManager() ||
+          (
+            hasRole(['waiter', 'cashier', 'kitchen']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentOrderId', 'currentBillTotal', 'assignedWaiterId', 'assignedWaiterName', 'orderTime', 'updatedAt'])
+          ) ||
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentOrderId', 'orderTime', 'updatedAt']) &&
+            incoming().status == 'Ordered' &&
+            'currentOrderId' in incoming() &&
+            isValidId(incoming().currentOrderId) &&
+            existsAfter(/databases/$(database)/documents/orders/$(incoming().currentOrderId))
+          )
+        );
+
+      allow delete: if isValidId(tableId) && isAdminOrManager();
+    }
+
+    // 4. Menu Categories
+    match /menu_categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if true;
+
+      allow create: if isValidId(categoryId) && isAdminOrManager() && isValidMenuCategory(incoming()) &&
+        incoming().id == categoryId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(categoryId) && isAdminOrManager() && isValidMenuCategory(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(categoryId) && isAdminOrManager();
+    }
+
+    // 5. Menu Items
+    match /menu_items/{itemId} {
+      allow get: if isValidId(itemId);
+      allow list: if true;
+
+      allow create: if isValidId(itemId) && isAdminOrManager() && isValidMenuItem(incoming()) &&
+        incoming().id == itemId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(itemId) && isAdminOrManager() && isValidMenuItem(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(itemId) && isAdminOrManager();
+    }
+
+    // 6. Orders
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && (
+        isActiveStaff() ||
+        existing().source == 'qr' ||
+        (isSignedIn() && 'customerId' in existing() && existing().customerId == request.auth.uid)
+      );
+      allow list: if isActiveStaff() || (isSignedIn() && existing().customerId == request.auth.uid);
+
+      allow create: if isValidId(orderId) && isValidOrder(incoming()) &&
+        incoming().id == orderId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          (hasRole(['super_admin', 'manager', 'waiter', 'cashier'])) ||
+          (
+            incoming().source == 'qr' &&
+            incoming().status == 'New' &&
+            incoming().billed == false &&
+            (!('inventoryDeducted' in incoming()) || incoming().inventoryDeducted == false) &&
+            (!('customerId' in incoming()) || (isSignedIn() && incoming().customerId == request.auth.uid)) &&
+            'tableId' in incoming() &&
+            isValidId(incoming().tableId) &&
+            exists(/databases/$(database)/documents/tables/$(incoming().tableId))
+          )
+        );
+
+      allow update: if isValidId(orderId) && isActiveStaff() && isValidOrder(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdminOrManager() ||
+          (
+            existing().status != 'Cancelled' &&
+            (
+              (hasRole(['kitchen']) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'priority', 'inventoryDeducted', 'updatedAt'])) ||
+              (hasRole(['waiter']) && existing().billed == false && incoming().diff(existing()).affectedKeys().hasOnly(['items', 'subtotal', 'specialInstructions', 'status', 'tableId', 'tableNumber', 'updatedAt'])) ||
+              (hasRole(['cashier']) && incoming().diff(existing()).affectedKeys().hasOnly(['billed', 'billId', 'status', 'updatedAt']))
+            )
+          )
+        );
+
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    // 7. POS Bills & Invoices
+    match /bills/{billId} {
+      allow get: if isValidId(billId) && hasRole(['super_admin', 'manager', 'cashier', 'waiter']);
+      allow list: if hasRole(['super_admin', 'manager', 'cashier', 'waiter']);
+
+      allow create: if isValidId(billId) && hasRole(['super_admin', 'manager', 'cashier']) &&
+        isValidBill(incoming()) &&
+        incoming().id == billId &&
+        incoming().cashierId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(billId) && isValidBill(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdminOrManager() ||
+          (
+            hasRole(['cashier']) &&
+            existing().paymentStatus in ['Unpaid', 'Folio'] &&
+            incoming().paymentStatus in ['Paid', 'Folio'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['items', 'subtotal', 'discountType', 'discountValue', 'discountAmount', 'taxBreakdown', 'taxAmount', 'totalAmount', 'paymentStatus', 'paymentMethod', 'splitPayments', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(billId) && isAdmin();
+    }
+
+    // 8. Room Service Folios
+    match /room_folios/{folioId} {
+      allow get: if isValidId(folioId) && hasRole(['super_admin', 'manager', 'cashier', 'waiter']);
+      allow list: if hasRole(['super_admin', 'manager', 'cashier', 'waiter']);
+
+      allow create: if isValidId(folioId) && hasRole(['super_admin', 'manager', 'cashier', 'waiter']) &&
+        isValidRoomFolio(incoming()) &&
+        incoming().id == folioId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(folioId) && hasRole(['super_admin', 'manager', 'cashier', 'waiter']) &&
+        isValidRoomFolio(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdminOrManager() ||
+          (existing().status == 'Active' && incoming().diff(existing()).affectedKeys().hasOnly(['orderIds', 'totalAmount', 'paidAmount', 'status', 'updatedAt']))
+        );
+
+      allow delete: if isValidId(folioId) && isAdmin();
+    }
+
+    // 9. Inventory Items
+    match /inventory/{itemId} {
+      allow get: if isValidId(itemId) && isActiveStaff();
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(itemId) && isAdminOrManager() && isValidInventoryItem(incoming()) &&
+        incoming().id == itemId &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(itemId) && isValidInventoryItem(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().updatedAt == request.time && (
+          isAdminOrManager() ||
+          (hasRole(['kitchen']) && incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'updatedAt']))
+        );
+
+      allow delete: if isValidId(itemId) && isAdminOrManager();
+    }
+
+    // 10. Inventory Logs
+    match /inventory_logs/{logId} {
+      allow get: if isValidId(logId) && isActiveStaff();
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(logId) && hasRole(['super_admin', 'manager', 'kitchen']) &&
+        isValidInventoryLog(incoming()) &&
+        incoming().id == logId &&
+        incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    // 11. Suppliers
+    match /suppliers/{supplierId} {
+      allow get: if isValidId(supplierId) && isAdminOrManager();
+      allow list: if isAdminOrManager();
+
+      allow create: if isValidId(supplierId) && isAdminOrManager() && isValidSupplier(incoming()) &&
+        incoming().id == supplierId &&
+        incoming().createdAt == request.time;
+
+      allow update: if isValidId(supplierId) && isAdminOrManager() && isValidSupplier(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt;
+
+      allow delete: if isValidId(supplierId) && isAdminOrManager();
+    }
+
+    // 12. Service Requests
+    match /service_requests/{requestId} {
+      allow get: if isValidId(requestId) && isActiveStaff();
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(requestId) && isValidServiceRequest(incoming()) &&
+        incoming().id == requestId &&
+        incoming().status == 'Pending' &&
+        isValidId(incoming().tableId) &&
+        exists(/databases/$(database)/documents/tables/$(incoming().tableId)) &&
+        incoming().createdAt == request.time;
+
+      allow update: if isValidId(requestId) && isActiveStaff() && isValidServiceRequest(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'note']);
+
+      allow delete: if isValidId(requestId) && isAdminOrManager();
+    }
+
+    // 13. Customer Feedback
+    match /feedback/{feedbackId} {
+      allow get: if isValidId(feedbackId) && isActiveStaff();
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(feedbackId) && isValidFeedback(incoming()) &&
+        incoming().id == feedbackId &&
+        incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isValidId(feedbackId) && isAdmin();
+    }
+
+    // 14. Operational Notifications
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isActiveStaff();
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(notificationId) && isValidNotification(incoming()) &&
+        incoming().id == notificationId &&
+        incoming().read == false &&
+        incoming().createdAt == request.time && (
+          isActiveStaff() ||
+          incoming().type in ['qr_order', 'waiter_call', 'bill_request']
+        );
+
+      allow update: if isValidId(notificationId) && isActiveStaff() && isValidNotification(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+
+      allow delete: if isValidId(notificationId) && isAdminOrManager();
+    }
+
+    // 15. Hotel Settings
+    match /hotel_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if isActiveStaff();
+
+      allow create: if isValidId(settingId) && isAdmin() && isValidHotelSettings(incoming()) &&
+        incoming().id == settingId &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(settingId) && isAdmin() && isValidHotelSettings(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // 16. Customer Profiles (Strictly isolated from staff/admin)
+    match /customer_profiles/{userId} {
+      allow get: if isValidId(userId) && ((isSignedIn() && request.auth.uid == userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isValidId(userId) && isSignedIn() && request.auth.uid == userId &&
+        isValidCustomerProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().active == true &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId) && isSignedIn() && isValidCustomerProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            request.auth.uid == userId &&
+            incoming().active == existing().active &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'preferredTable', 'dietaryPreference', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 17. Immutable Admin Audit Logs
+    match /audit_logs/{logId} {
+      allow get, list: if isAdmin();
+
+      allow create: if isValidId(logId) && isAdminOrManager() &&
+        isValidAuditLog(incoming()) &&
+        incoming().id == logId &&
+        incoming().actorUid == request.auth.uid &&
+        incoming().createdAt == request.time;
+
+      allow update, delete: if false;
+    }
+  }
+}

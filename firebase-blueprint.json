@@ -1,0 +1,412 @@
+{
+  "entities": {
+    "StaffProfile": {
+      "title": "StaffProfile",
+      "description": "Verified staff user profile mapped to an authenticated UID and assigned RBAC role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": { "type": "string", "enum": ["super_admin", "manager", "cashier", "waiter", "kitchen"] },
+        "active": { "type": "boolean" },
+        "phone": { "type": "string", "maxLength": 20 },
+        "shift": { "type": "string", "maxLength": 40 },
+        "inviteId": { "type": "string", "maxLength": 128 },
+        "permissions": { "type": "array" },
+        "lastLoginAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "active", "createdAt", "updatedAt"]
+    },
+    "StaffInvite": {
+      "title": "StaffInvite",
+      "description": "Admin-managed staff directory and role authorization record keyed by normalized email ID.",
+      "type": "object",
+      "properties": {
+        "inviteId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": { "type": "string", "enum": ["super_admin", "manager", "cashier", "waiter", "kitchen"] },
+        "active": { "type": "boolean" },
+        "phone": { "type": "string", "maxLength": 20 },
+        "shift": { "type": "string", "maxLength": 40 },
+        "permissions": { "type": "array" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["inviteId", "email", "displayName", "role", "active", "createdBy", "createdAt", "updatedAt"]
+    },
+    "CustomerProfile": {
+      "title": "CustomerProfile",
+      "description": "Registered customer account isolated from staff and admin panels.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 120 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "preferredTable": { "type": "string", "maxLength": 20 },
+        "dietaryPreference": { "type": "string", "enum": ["all", "veg", "nonveg"] },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "active", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable administrative audit log recording sensitive staff, role, and configuration actions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "action": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "actorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "actorRole": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "targetType": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "action", "actorUid", "actorName", "actorRole", "targetType", "summary", "createdAt"]
+    },
+    "RestaurantTable": {
+      "title": "RestaurantTable",
+      "description": "Physical dining table on the restaurant floor with real-time service status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tableNumber": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "section": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "capacity": { "type": "number" },
+        "status": { "type": "string", "enum": ["Available", "Occupied", "Ordered", "Preparing", "Ready", "Served", "Billing"] },
+        "currentOrderId": { "type": "string", "maxLength": 128 },
+        "currentBillTotal": { "type": "number" },
+        "assignedWaiterId": { "type": "string", "maxLength": 128 },
+        "assignedWaiterName": { "type": "string", "maxLength": 80 },
+        "orderTime": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tableNumber", "name", "section", "capacity", "status", "updatedAt"]
+    },
+    "MenuCategory": {
+      "title": "MenuCategory",
+      "description": "Digital menu category managed by admins and managers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "sortOrder": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "sortOrder", "active", "createdAt", "updatedAt"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Menu dish with INR pricing, dietary flag, availability, and recipe stock links.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 400 },
+        "price": { "type": "number" },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "categoryName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "isVeg": { "type": "boolean" },
+        "isBestseller": { "type": "boolean" },
+        "available": { "type": "boolean" },
+        "imageUrl": { "type": "string", "maxLength": 150000 },
+        "sortOrder": { "type": "number" },
+        "prepTimeMins": { "type": "number" },
+        "recipe": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "description", "price", "categoryId", "categoryName", "isVeg", "isBestseller", "available", "sortOrder", "createdAt", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Live dining, QR, POS, or room service order shared across Guest, Waiter, KDS, and POS.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderNumber": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "source": { "type": "string", "enum": ["qr", "waiter", "pos", "room_service"] },
+        "tableId": { "type": "string", "maxLength": 64 },
+        "tableNumber": { "type": "string", "maxLength": 20 },
+        "roomNumber": { "type": "string", "maxLength": 20 },
+        "guestName": { "type": "string", "maxLength": 80 },
+        "guestSessionId": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "waiterId": { "type": "string", "maxLength": 128 },
+        "waiterName": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["New", "Accepted", "Preparing", "Ready", "Served", "Completed", "Cancelled"] },
+        "priority": { "type": "string", "enum": ["Normal", "Urgent"] },
+        "items": { "type": "array" },
+        "specialInstructions": { "type": "string", "maxLength": 300 },
+        "subtotal": { "type": "number" },
+        "billed": { "type": "boolean" },
+        "billId": { "type": "string", "maxLength": 128 },
+        "inventoryDeducted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "orderNumber", "source", "status", "priority", "items", "subtotal", "billed", "createdAt", "updatedAt"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "POS invoice with tax breakdown, discounts, split/single payments, and settlement tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 32 },
+        "source": { "type": "string", "enum": ["qr", "waiter", "pos", "room_service"] },
+        "tableId": { "type": "string", "maxLength": 64 },
+        "tableNumber": { "type": "string", "maxLength": 20 },
+        "roomNumber": { "type": "string", "maxLength": 20 },
+        "guestName": { "type": "string", "maxLength": 80 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discountType": { "type": "string", "enum": ["none", "flat", "percent"] },
+        "discountValue": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "taxBreakdown": { "type": "array" },
+        "taxAmount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Unpaid", "Cancelled", "Folio"] },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "UPI", "Card", "Split", "Room Folio", "Pending"] },
+        "splitPayments": { "type": "array" },
+        "cashierId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "cashierName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "cancelReason": { "type": "string", "maxLength": 250 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "invoiceNumber", "items", "subtotal", "discountAmount", "taxAmount", "totalAmount", "paymentStatus", "paymentMethod", "cashierId", "cashierName", "createdAt", "updatedAt"]
+    },
+    "RoomFolio": {
+      "title": "RoomFolio",
+      "description": "Standalone hotel room service guest folio tracking accumulated room dining charges.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "roomNumber": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "guestName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "guestPhone": { "type": "string", "maxLength": 20 },
+        "checkInRef": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Active", "Settled"] },
+        "orderIds": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "roomNumber", "guestName", "status", "orderIds", "totalAmount", "paidAmount", "createdAt", "updatedAt"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Kitchen ingredient stock item with threshold alerting and supplier mapping.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "minThreshold": { "type": "number" },
+        "unitCost": { "type": "number" },
+        "supplierId": { "type": "string", "maxLength": 64 },
+        "supplierName": { "type": "string", "maxLength": 80 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "quantity", "unit", "minThreshold", "unitCost", "updatedAt"]
+    },
+    "InventoryLog": {
+      "title": "InventoryLog",
+      "description": "Audit ledger of ingredient purchases, order consumptions, and manual adjustments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "itemName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "type": { "type": "string", "enum": ["purchase", "consumption", "adjustment"] },
+        "quantityDelta": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "note": { "type": "string", "maxLength": 200 },
+        "performedBy": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "itemId", "itemName", "type", "quantityDelta", "unit", "performedBy", "createdAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Restaurant ingredient supplier directory.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "contactPerson": { "type": "string", "maxLength": 80 },
+        "phone": { "type": "string", "maxLength": 25 },
+        "category": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "ServiceRequest": {
+      "title": "ServiceRequest",
+      "description": "Guest waiter call or bill request triggered from a table QR menu.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tableId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "tableNumber": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "type": { "type": "string", "enum": ["call_waiter", "request_bill"] },
+        "status": { "type": "string", "enum": ["Pending", "Resolved"] },
+        "note": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tableId", "tableNumber", "type", "status", "createdAt"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Customer dining rating and review with optional Google review consent.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 32 },
+        "tableNumber": { "type": "string", "maxLength": 20 },
+        "guestName": { "type": "string", "maxLength": 80 },
+        "foodRating": { "type": "number" },
+        "serviceRating": { "type": "number" },
+        "ambianceRating": { "type": "number" },
+        "overallRating": { "type": "number" },
+        "comment": { "type": "string", "maxLength": 500 },
+        "googleConsent": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "foodRating", "serviceRating", "ambianceRating", "overallRating", "googleConsent", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Real-time operational notification for staff dashboards.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["qr_order", "waiter_order", "kitchen_update", "order_ready", "bill_request", "waiter_call", "low_stock", "cancelled"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 250 },
+        "targetRoles": { "type": "array" },
+        "relatedId": { "type": "string", "maxLength": 128 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "title", "message", "targetRoles", "read", "createdAt"]
+    },
+    "HotelSettings": {
+      "title": "HotelSettings",
+      "description": "Hotel profile, configurable GST/tax rates, UPI ID, invoice layout, and operating hours.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "hotelName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "tagline": { "type": "string", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 250 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 100 },
+        "gstin": { "type": "string", "maxLength": 30 },
+        "currency": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "upiId": { "type": "string", "maxLength": 80 },
+        "invoicePrefix": { "type": "string", "maxLength": 20 },
+        "invoiceFooter": { "type": "string", "maxLength": 250 },
+        "operatingHours": { "type": "string", "maxLength": 100 },
+        "taxes": { "type": "array" },
+        "paymentMethods": { "type": "array" },
+        "googleReviewUrl": { "type": "string", "maxLength": 300 },
+        "notificationsEnabled": { "type": "boolean" },
+        "requireCustomerLogin": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "hotelName", "currency", "taxes", "paymentMethods", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/staff_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/StaffProfile" },
+      "description": "Authenticated staff profiles with verified RBAC role."
+    },
+    "/staff_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Pre-authorized staff email invitations managed by Super Admin."
+    },
+    "/tables/{tableId}": {
+      "schema": { "$ref": "#/entities/RestaurantTable" },
+      "description": "Floor tables and real-time occupancy/order states."
+    },
+    "/menu_categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/MenuCategory" },
+      "description": "Digital menu categories."
+    },
+    "/menu_items/{itemId}": {
+      "schema": { "$ref": "#/entities/MenuItem" },
+      "description": "Digital restaurant dishes and recipe mappings."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Live restaurant, QR, POS, and room service orders."
+    },
+    "/bills/{billId}": {
+      "schema": { "$ref": "#/entities/Bill" },
+      "description": "POS invoices and payment settlement records."
+    },
+    "/room_folios/{folioId}": {
+      "schema": { "$ref": "#/entities/RoomFolio" },
+      "description": "Standalone hotel room service guest folios."
+    },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Kitchen ingredient inventory stock."
+    },
+    "/inventory_logs/{logId}": {
+      "schema": { "$ref": "#/entities/InventoryLog" },
+      "description": "Ingredient stock purchase, consumption, and adjustment ledger."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Supplier records for inventory restocking."
+    },
+    "/service_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/ServiceRequest" },
+      "description": "Waiter calls and bill requests submitted by QR table guests."
+    },
+    "/feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/Feedback" },
+      "description": "Customer dining feedback and ratings."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Operational notifications targeted to staff roles."
+    },
+    "/hotel_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/HotelSettings" },
+      "description": "Hotel Rudraksh Inn configuration and tax setup."
+    },
+    "/customer_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/CustomerProfile" },
+      "description": "Customer portal accounts strictly separated from staff/admin access."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable admin/manager audit trail of sensitive system actions."
+    }
+  }
+}

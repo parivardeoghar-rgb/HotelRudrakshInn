@@ -1,0 +1,110 @@
+/**
+ * Security Rules Verification Suite (Phase 0 TDD Spec)
+ * Validates the "Dirty Dozen" adversarial payloads against firestore.rules.
+ * Run with Firebase Emulator Suite when testing locally:
+ *   npx firebase emulators:exec --only firestore "npx tsx firestore.rules.test.ts"
+ */
+export const dirtyDozenPayloads = [
+  {
+    name: '1. Self-Privilege Escalation on staff_profiles',
+    collection: 'staff_profiles/attacker_uid',
+    operation: 'create',
+    auth: { uid: 'attacker_uid', email: 'attacker@gmail.com', email_verified: true },
+    payload: {
+      uid: 'attacker_uid',
+      email: 'attacker@gmail.com',
+      displayName: 'Attacker',
+      role: 'super_admin',
+      active: true,
+    },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '2. Role Tampering on staff_profiles update',
+    collection: 'staff_profiles/waiter_uid',
+    operation: 'update',
+    auth: { uid: 'waiter_uid', email: 'waiter@gmail.com', email_verified: true },
+    payload: { role: 'manager' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '3. Ghost Field Shadow Update on orders',
+    collection: 'orders/ord_1',
+    operation: 'update',
+    auth: { uid: 'waiter_uid', email: 'waiter@gmail.com', email_verified: true },
+    payload: { status: 'Served', isGhostAdmin: true },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '4. Unverified Email Admin Spoof',
+    collection: 'staff_invites/inv_1',
+    operation: 'create',
+    auth: { uid: 'spoof_uid', email: 'parivardeoghar@gmail.com', email_verified: false },
+    payload: { email: 'hacker@gmail.com', role: 'super_admin' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '5. PII Scraping on staff_profiles',
+    collection: 'staff_profiles',
+    operation: 'list',
+    auth: null,
+    payload: null,
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '6. ID Poisoning on orders create',
+    collection: `orders/${'a'.repeat(200)}`,
+    operation: 'create',
+    auth: null,
+    payload: { id: 'a'.repeat(200), source: 'qr', tableId: 'T1' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '7. Timestamp Forgery on bills create',
+    collection: 'bills/bill_1',
+    operation: 'create',
+    auth: { uid: 'cashier_uid', email: 'cashier@gmail.com', email_verified: true },
+    payload: { invoiceNumber: 'INV-001', createdAt: '2020-01-01T00:00:00Z' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '8. Unauthorized Bill Cancellation by Waiter',
+    collection: 'bills/bill_1',
+    operation: 'update',
+    auth: { uid: 'waiter_uid', email: 'waiter@gmail.com', email_verified: true },
+    payload: { paymentStatus: 'Cancelled', cancelReason: 'Free meal' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '9. Terminal Paid Bill Amount Mutation',
+    collection: 'bills/bill_paid',
+    operation: 'update',
+    auth: { uid: 'cashier_uid', email: 'cashier@gmail.com', email_verified: true },
+    payload: { totalAmount: 1 },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '10. Orphaned QR Order with non-existent tableId',
+    collection: 'orders/ord_orphan',
+    operation: 'create',
+    auth: null,
+    payload: { id: 'ord_orphan', source: 'qr', tableId: 'NON_EXISTENT', status: 'New' },
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '11. Anonymous Guest Order Collection List Scraping',
+    collection: 'orders',
+    operation: 'list',
+    auth: null,
+    payload: null,
+    expected: 'PERMISSION_DENIED',
+  },
+  {
+    name: '12. Array Exhaustion on orders items (>50)',
+    collection: 'orders/ord_exhaust',
+    operation: 'create',
+    auth: null,
+    payload: { id: 'ord_exhaust', source: 'qr', tableId: 'T1', items: new Array(120).fill({ itemId: 'm1', qty: 1 }) },
+    expected: 'PERMISSION_DENIED',
+  },
+];
