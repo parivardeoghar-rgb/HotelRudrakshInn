@@ -1,4 +1,5 @@
 import type {
+  HotelRoom,
   HotelSettings,
   InventoryItem,
   MenuCategory,
@@ -54,6 +55,19 @@ export const SEED_TABLES: Omit<RestaurantTable, 'updatedAt'>[] = [
   { id: 'T8', tableNumber: 'T8', name: 'Family 08', section: 'Family AC Hall', capacity: 6, status: 'Available' },
   { id: 'T9', tableNumber: 'V1', name: 'Rudraksh Suite 1', section: 'Rudraksh VIP Lounge', capacity: 8, status: 'Available' },
   { id: 'T10', tableNumber: 'V2', name: 'Rudraksh Suite 2', section: 'Rudraksh VIP Lounge', capacity: 10, status: 'Available' },
+];
+
+export const SEED_HOTEL_ROOMS: HotelRoom[] = [
+  { id: 'R101', roomNumber: '101', name: 'Room 101', floor: '1st Floor', type: 'Deluxe Room' },
+  { id: 'R102', roomNumber: '102', name: 'Room 102', floor: '1st Floor', type: 'Deluxe Room' },
+  { id: 'R103', roomNumber: '103', name: 'Room 103', floor: '1st Floor', type: 'Family Deluxe' },
+  { id: 'R104', roomNumber: '104', name: 'Room 104', floor: '1st Floor', type: 'Family Deluxe' },
+  { id: 'R201', roomNumber: '201', name: 'Room 201', floor: '2nd Floor', type: 'Executive Room' },
+  { id: 'R202', roomNumber: '202', name: 'Room 202', floor: '2nd Floor', type: 'Executive Room' },
+  { id: 'R203', roomNumber: '203', name: 'Room 203', floor: '2nd Floor', type: 'Executive Suite' },
+  { id: 'R204', roomNumber: '204', name: 'Room 204', floor: '2nd Floor', type: 'Executive Suite' },
+  { id: 'R301', roomNumber: '301', name: 'Room 301', floor: '3rd Floor', type: 'Rudraksh Royal Suite' },
+  { id: 'R302', roomNumber: '302', name: 'Room 302', floor: '3rd Floor', type: 'Rudraksh Royal Suite' },
 ];
 
 export const SEED_CATEGORIES: Omit<MenuCategory, 'createdAt' | 'updatedAt'>[] = [

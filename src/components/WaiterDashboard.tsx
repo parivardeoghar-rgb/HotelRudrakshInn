@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   addItemsToExistingOrder,
+  approveTableTransferRequest,
   mergeTableOrders,
   placeStaffOrder,
   resolveServiceRequest,
@@ -22,6 +23,7 @@ import {
   updateTableStatus,
 } from '../services/firestoreService';
 import type {
+  DietaryTag,
   InventoryItem,
   MenuItem,
   Order,
@@ -31,6 +33,7 @@ import type {
   StaffProfile,
 } from '../types';
 import { formatINR, formatTime } from '../utils/format';
+import { DietaryPreferenceField } from './DietaryPreferenceField';
 
 interface WaiterDashboardProps {
   currentUser: StaffProfile;
@@ -55,6 +58,7 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
   // Order composer state
   const [selectedTableId, setSelectedTableId] = useState<string>('');
   const [guestName, setGuestName] = useState('');
+  const [dietaryTags, setDietaryTags] = useState<DietaryTag[]>([]);
   const [instructions, setInstructions] = useState('');
   const [searchMenu, setSearchMenu] = useState('');
   const [draftItems, setDraftItems] = useState<OrderItem[]>([]);
@@ -67,6 +71,7 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
   const [transferTargetId, setTransferTargetId] = useState<string>('');
   const [mergeSource, setMergeSource] = useState<RestaurantTable | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState<string>('');
+  const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
 
   const notify = (msg: string) => {
     setFeedbackBanner(msg);
@@ -139,7 +144,12 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
     setSubmitting(true);
     try {
       if (existingOrderToAppend) {
-        await addItemsToExistingOrder(existingOrderToAppend, draftItems, instructions);
+        await addItemsToExistingOrder(
+          existingOrderToAppend,
+          draftItems,
+          instructions,
+          dietaryTags
+        );
         notify(`Added ${draftItems.length} dish(es) to ${existingOrderToAppend.orderNumber}.`);
       } else {
         await placeStaffOrder({
@@ -149,11 +159,13 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
           guestName: guestName || 'Dine-in Guest',
           waiterId: currentUser.uid,
           waiterName: currentUser.displayName,
+          dietaryTags,
           specialInstructions: instructions,
         });
         notify(`Order sent to kitchen for Table ${table.tableNumber}.`);
       }
       setDraftItems([]);
+      setDietaryTags([]);
       setInstructions('');
       setGuestName('');
       setExistingOrderToAppend(null);
@@ -245,30 +257,80 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
       {/* Live Alerts Strip (QR Orders + Ready Pickup + Waiter Calls) */}
       {(pendingCalls.length > 0 || activeQrOrders.length > 0 || readyOrders.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {pendingCalls.map((req) => (
-            <div
-              key={req.id}
-              className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-2.5">
-                <BellRing className="w-5 h-5 text-amber-700 shrink-0" />
-                <div className="text-xs">
-                  <div className="font-bold text-amber-950">
-                    {req.type === 'call_waiter' ? 'Waiter Call' : 'Bill Requested'} · Table{' '}
-                    {req.tableNumber}
-                  </div>
-                  <div className="text-amber-800">{formatTime(req.createdAt)}</div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => void resolveServiceRequest(req)}
-                className="px-3 py-1.5 rounded-lg bg-amber-900 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
+          {pendingCalls.map((req) => {
+            const isTransfer = req.type === 'table_transfer';
+            return (
+              <div
+                key={req.id}
+                className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3"
               >
-                Acknowledge
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {isTransfer ? (
+                    <ArrowRightLeft className="w-5 h-5 text-amber-700 shrink-0" />
+                  ) : (
+                    <BellRing className="w-5 h-5 text-amber-700 shrink-0" />
+                  )}
+                  <div className="text-xs min-w-0">
+                    <div className="font-bold text-amber-950">
+                      {isTransfer
+                        ? `Table Transfer · ${req.orderNumber || 'Order'} · Table ${req.tableNumber} → Table ${
+                            req.targetTableNumber || '?'
+                          }`
+                        : `${req.type === 'call_waiter' ? 'Waiter Call' : 'Bill Requested'} · Table ${
+                            req.tableNumber
+                          }`}
+                    </div>
+                    <div className="text-amber-800 truncate">
+                      {formatTime(req.createdAt)}
+                      {req.note ? ` · ${req.note}` : ''}
+                    </div>
+                  </div>
+                </div>
+                {isTransfer ? (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      disabled={busyRequestId === req.id}
+                      onClick={async () => {
+                        setBusyRequestId(req.id);
+                        try {
+                          const moved = await approveTableTransferRequest(req, tables, orders);
+                          notify(
+                            moved
+                              ? `Moved ${req.orderNumber || 'order'} from Table ${req.tableNumber} to Table ${
+                                  req.targetTableNumber || ''
+                                }.`
+                              : 'Table transfer request acknowledged.'
+                          );
+                        } finally {
+                          setBusyRequestId(null);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#141518] text-[#D4AF37] text-xs font-semibold cursor-pointer whitespace-nowrap disabled:opacity-60"
+                    >
+                      {busyRequestId === req.id ? 'Moving...' : 'Approve & Move'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyRequestId === req.id}
+                      onClick={() => void resolveServiceRequest(req)}
+                      className="px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white text-amber-950 text-xs font-semibold cursor-pointer whitespace-nowrap"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void resolveServiceRequest(req)}
+                    className="px-3 py-1.5 rounded-lg bg-amber-900 text-white text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    Acknowledge
+                  </button>
+                )}
+              </div>
+            );
+          })}
 
           {readyOrders.map((ord) => (
             <div
@@ -554,6 +616,12 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
                 </div>
               )}
 
+              <DietaryPreferenceField
+                value={dietaryTags}
+                onChange={setDietaryTags}
+                compact
+              />
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-700 mb-1">
                   Kitchen Special Instructions
@@ -562,7 +630,7 @@ export const WaiterDashboard: React.FC<WaiterDashboardProps> = ({
                   rows={2}
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="No onion/garlic, extra spicy, serve starters first..."
+                  placeholder="Extra spicy, serve starters first..."
                   className="w-full px-3 py-2 rounded-lg border border-zinc-300 text-sm"
                 />
               </div>

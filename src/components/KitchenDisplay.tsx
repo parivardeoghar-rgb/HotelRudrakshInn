@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ChefHat, Clock, Flame } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChefHat, Clock, Flame } from 'lucide-react';
 import {
   toggleOrderPriority,
   updateOrderStatusAndInventory,
@@ -139,15 +139,27 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({
                           {ord.orderNumber}
                         </span>
                         <span aria-hidden="true">·</span>
-                        <span className="uppercase">{ord.source}</span>
+                        <span className="uppercase">
+                          {ord.source === 'room_service' ? 'ROOM SERVICE' : ord.source}
+                        </span>
                       </div>
                       <div className="text-sm font-semibold text-[#D4AF37] mt-0.5">
                         {ord.tableNumber
                           ? `Table ${ord.tableNumber}`
                           : ord.roomNumber
-                          ? `Room ${ord.roomNumber}`
+                          ? `Room ${ord.roomNumber}${
+                              ord.source === 'room_service' && ord.guestName
+                                ? ` · ${ord.guestName}`
+                                : ''
+                            }`
                           : 'Takeaway / Counter'}
                       </div>
+                      {(ord.mealSession || ord.deliverySlot) && (
+                        <div className="text-xs font-medium text-emerald-300 mt-0.5">
+                          {ord.mealSession || 'Meal Order'}
+                          {ord.deliverySlot ? ` · ${ord.deliverySlot}` : ''}
+                        </div>
+                      )}
                     </div>
 
                     <div className="text-right space-y-1">
@@ -193,6 +205,46 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({
                       </div>
                     ))}
                   </div>
+
+                  {/* Dietary & Allergy Alert Tags */}
+                  {ord.dietaryTags && ord.dietaryTags.length > 0 && (
+                    <div
+                      className={`p-3 rounded-lg border text-xs space-y-1 ${
+                        ord.dietaryTags.includes('Nut allergy')
+                          ? 'bg-rose-950/65 border-rose-500/60 text-rose-100'
+                          : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-semibold text-[11px] tracking-wide">
+                        <AlertTriangle
+                          className={`w-3.5 h-3.5 shrink-0 ${
+                            ord.dietaryTags.includes('Nut allergy')
+                              ? 'text-rose-300'
+                              : 'text-emerald-300'
+                          }`}
+                        />
+                        <span>Dietary &amp; Allergy Alert</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 font-semibold text-sm">
+                        {ord.dietaryTags.map((tag, idx) => (
+                          <React.Fragment key={tag}>
+                            {idx > 0 && (
+                              <span aria-hidden="true" className="opacity-60">
+                                ·
+                              </span>
+                            )}
+                            <span
+                              className={
+                                tag === 'Nut allergy' ? 'text-rose-200' : 'text-emerald-200'
+                              }
+                            >
+                              {tag}
+                            </span>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Special Instructions */}
                   {ord.specialInstructions && (

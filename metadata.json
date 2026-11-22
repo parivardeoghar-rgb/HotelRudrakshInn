@@ -1,7 +1,7 @@
 {
   "name": "Hotel Rudraksh Inn — Smart Restaurant Management",
   "description": "Smart Restaurant POS, QR Table Ordering, KDS, Room Service, Inventory & Analytics for Hotel Rudraksh Inn, Deoghar. Developed by Baidyanath Media Agency.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

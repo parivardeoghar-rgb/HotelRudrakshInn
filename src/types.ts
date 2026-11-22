@@ -14,6 +14,8 @@ export type TableStatus =
 export type OrderSource = 'qr' | 'waiter' | 'pos' | 'room_service';
 export type OrderStatus = 'New' | 'Accepted' | 'Preparing' | 'Ready' | 'Served' | 'Completed' | 'Cancelled';
 export type OrderPriority = 'Normal' | 'Urgent';
+export type MealSession = 'Morning Breakfast' | 'Afternoon Lunch' | 'Evening' | 'Dinner';
+export type MealPhotoReviewStatus = 'Pending Review' | 'Reviewed' | 'Featured' | 'Flagged';
 
 export type PaymentStatus = 'Paid' | 'Unpaid' | 'Cancelled' | 'Folio';
 export type PaymentMethod = 'Cash' | 'UPI' | 'Card' | 'Split' | 'Room Folio' | 'Pending';
@@ -70,6 +72,7 @@ export interface CustomerProfile {
   phone?: string;
   preferredTable?: string;
   dietaryPreference?: 'all' | 'veg';
+  favoriteItemIds?: string[];
   active: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -100,6 +103,14 @@ export interface RestaurantTable {
   assignedWaiterName?: string;
   orderTime?: unknown;
   updatedAt?: unknown;
+}
+
+export interface HotelRoom {
+  id: string;
+  roomNumber: string;
+  name: string;
+  floor: string;
+  type: string;
 }
 
 export interface MenuCategory {
@@ -146,6 +157,13 @@ export interface OrderItem {
   notes?: string;
 }
 
+export type DietaryTag = 'Jain' | 'Nut allergy';
+
+export const DIETARY_TAG_OPTIONS: { id: DietaryTag; label: string; hint: string }[] = [
+  { id: 'Jain', label: 'Jain', hint: 'No onion, garlic, or root vegetables' },
+  { id: 'Nut allergy', label: 'Nut allergy', hint: 'Avoid cashews, almonds & peanuts' },
+];
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -161,11 +179,19 @@ export interface Order {
   status: OrderStatus;
   priority: OrderPriority;
   items: OrderItem[];
+  mealSession?: MealSession;
+  deliverySlot?: string;
+  dietaryTags?: DietaryTag[];
   specialInstructions?: string;
   subtotal: number;
   billed: boolean;
   billId?: string;
   inventoryDeducted?: boolean;
+  mealPhotoUrl?: string;
+  mealPhotoCaption?: string;
+  mealPhotoStatus?: MealPhotoReviewStatus;
+  mealPhotoUploadedAt?: unknown;
+  mealPhotoReviewedBy?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -270,8 +296,12 @@ export interface ServiceRequest {
   id: string;
   tableId: string;
   tableNumber: string;
-  type: 'call_waiter' | 'request_bill';
+  type: 'call_waiter' | 'request_bill' | 'table_transfer';
   status: 'Pending' | 'Resolved';
+  targetTableId?: string;
+  targetTableNumber?: string;
+  orderId?: string;
+  orderNumber?: string;
   note?: string;
   createdAt?: unknown;
 }
@@ -296,11 +326,14 @@ export interface AppNotification {
   id: string;
   type:
     | 'qr_order'
+    | 'room_order'
     | 'waiter_order'
     | 'kitchen_update'
     | 'order_ready'
     | 'bill_request'
     | 'waiter_call'
+    | 'table_transfer'
+    | 'meal_photo'
     | 'low_stock'
     | 'supplier_reorder'
     | 'cancelled';

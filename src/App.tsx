@@ -118,6 +118,17 @@ function getQueryTable(): string | null {
   }
 }
 
+function getQueryRoom(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('room');
+    const clean = raw ? raw.trim().slice(0, 20) : '';
+    return clean || null;
+  } catch {
+    return null;
+  }
+}
+
 function defaultModuleForRole(role: StaffRole, permissions?: WorkspaceModule[]): WorkspaceModule {
   const base =
     permissions && permissions.length > 0 ? permissions : ROLE_ALLOWED_MODULES[role];
@@ -139,6 +150,7 @@ function AppContent() {
     const parsed = parsePathname(window.location.pathname);
     return parsed.view === 'home' || parsed.view === 'selector' ? getQueryTable() : null;
   });
+  const [initialRoomNumber] = useState<string | null>(() => getQueryRoom());
   const [returnTableAfterCustomerLogin, setReturnTableAfterCustomerLogin] = useState<
     string | null
   >(() => getQueryTable());
@@ -592,6 +604,7 @@ function AppContent() {
       <CustomerDashboard
         customer={customerProfile}
         initialTableId={returnTableAfterCustomerLogin}
+        initialRoomNumber={initialRoomNumber}
         onProfileUpdated={(next) => setCustomerProfile(next)}
         onSignOut={handleSignOut}
       />
@@ -808,6 +821,8 @@ function AppContent() {
         {currentModule === 'feedback' && (
           <FeedbackView
             feedback={feedback}
+            orders={orders}
+            currentUser={staffProfile}
             canModerate={
               staffProfile.role === 'super_admin' || staffProfile.role === 'manager'
             }
@@ -871,6 +886,8 @@ function AppContent() {
   return (
     <CustomerHomepage
       customerProfile={customerProfile}
+      initialRoomNumber={initialRoomNumber}
+      onCustomerProfileUpdated={(next) => setCustomerProfile(next)}
       onOpenCustomerPortal={() => {
         setAuthError(null);
         if (customerProfile) {

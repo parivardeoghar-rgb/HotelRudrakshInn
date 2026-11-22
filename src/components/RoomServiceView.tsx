@@ -10,12 +10,15 @@ import {
 import {
   createAndSettleBill,
   createRoomFolio,
+  linkRoomOrderToFolio,
   placeStaffOrder,
   settleRoomFolio,
 } from '../services/firestoreService';
+import { SEED_HOTEL_ROOMS } from '../data/seedCatalog';
 import type {
   Bill,
   HotelSettings,
+  MealSession,
   MenuItem,
   Order,
   OrderItem,
@@ -24,6 +27,11 @@ import type {
   StaffProfile,
 } from '../types';
 import { calculateBillTotals, formatDateTime, formatINR } from '../utils/format';
+import {
+  getDefaultMealSessionForHour,
+  getMealSessionMeta,
+  MEAL_SESSION_OPTIONS,
+} from '../utils/mealSessions';
 import { InvoiceModal } from './InvoiceModal';
 
 interface RoomServiceViewProps {
@@ -49,10 +57,20 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
   const [items, setItems] = useState<OrderItem[]>([]);
   const [notes, setNotes] = useState('');
   const [postingMode, setPostingMode] = useState<'folio' | 'cash_now'>('folio');
+  const [mealSession, setMealSession] = useState<MealSession>(() =>
+    getDefaultMealSessionForHour()
+  );
+  const [deliverySlot, setDeliverySlot] = useState<string>('ASAP (Now)');
+  const [linkingOrderId, setLinkingOrderId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [checkoutFolio, setCheckoutFolio] = useState<RoomFolio | null>(null);
   const [checkoutMethod, setCheckoutMethod] = useState<PaymentMethod>('Cash');
   const [invoiceBill, setInvoiceBill] = useState<Bill | null>(null);
+
+  const selectedSessionMeta = useMemo(
+    () => getMealSessionMeta(mealSession),
+    [mealSession]
+  );
 
   const activeFolios = useMemo(
     () => folios.filter((f) => f.status === 'Active'),
@@ -125,6 +143,8 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
         guestName: targetGuest,
         waiterId: currentUser.uid,
         waiterName: currentUser.displayName,
+        mealSession,
+        deliverySlot,
         specialInstructions: notes,
         folioId: postingMode === 'folio' && folio ? folio.id : undefined,
       });
@@ -132,6 +152,15 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
       setNotes('');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleLinkOrderToFolio = async (order: Order, folio: RoomFolio) => {
+    setLinkingOrderId(order.id);
+    try {
+      await linkRoomOrderToFolio(order, folio);
+    } finally {
+      setLinkingOrderId(null);
     }
   };
 
@@ -217,11 +246,19 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
               <input
                 required
                 maxLength={20}
+                list="rudraksh-hotel-rooms"
                 value={roomNumber}
                 onChange={(e) => setRoomNumber(e.target.value)}
-                placeholder="Room No (e.g. 204)"
+                placeholder="Room No (e.g. 101)"
                 className="px-3 py-2 rounded-lg border border-zinc-300 text-xs"
               />
+              <datalist id="rudraksh-hotel-rooms">
+                {SEED_HOTEL_ROOMS.map((r) => (
+                  <option key={r.id} value={r.roomNumber}>
+                    Room {r.roomNumber} · {r.type}
+                  </option>
+                ))}
+              </datalist>
               <input
                 required
                 maxLength={80}
@@ -266,7 +303,11 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
                 onChange={(e) => setSelectedFolioId(e.target.value)}
                 className="px-3 py-2 rounded-lg border border-zinc-300 text-xs font-semibold bg-zinc-50"
               >
-                <option value="">Select Active Room Folio...</option>
+                <option value="">
+                  {roomNumber.trim()
+                    ? `Direct Room ${roomNumber.trim()} (No Folio Linked)`
+                    : 'Select Active Room Folio...'}
+                </option>
                 {activeFolios.map((f) => (
                   <option key={f.id} value={f.id}>
                     Room {f.roomNumber} — {f.guestName} ({formatINR(f.totalAmount)})
@@ -282,6 +323,52 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
                 <option value="folio">Post to Guest Room Folio (Pay at Checkout)</option>
                 <option value="cash_now">Bill Immediately via POS</option>
               </select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="staff-room-meal-session"
+                  className="block text-[11px] font-semibold text-zinc-600 mb-1"
+                >
+                  Meal Session
+                </label>
+                <select
+                  id="staff-room-meal-session"
+                  value={mealSession}
+                  onChange={(e) => {
+                    setMealSession(e.target.value as MealSession);
+                    setDeliverySlot('ASAP (Now)');
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-300 text-xs font-semibold bg-zinc-50"
+                >
+                  {MEAL_SESSION_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label} ({opt.windowLabel})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="staff-room-delivery-slot"
+                  className="block text-[11px] font-semibold text-zinc-600 mb-1"
+                >
+                  Room Delivery Time
+                </label>
+                <select
+                  id="staff-room-delivery-slot"
+                  value={deliverySlot}
+                  onChange={(e) => setDeliverySlot(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-300 text-xs font-semibold bg-zinc-50"
+                >
+                  {selectedSessionMeta.deliverySlots.map((slot) => (
+                    <option key={slot} value={slot}>
+                      {slot}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="divide-y divide-zinc-100 max-h-60 overflow-y-auto border border-zinc-200 rounded-lg px-3">
@@ -393,23 +480,61 @@ export const RoomServiceView: React.FC<RoomServiceViewProps> = ({
                 No room service orders yet.
               </p>
             ) : (
-              <div className="divide-y divide-zinc-100 max-h-72 overflow-y-auto">
-                {roomOrders.slice(0, 12).map((o) => (
-                  <div key={o.id} className="py-2.5 flex items-center justify-between text-xs">
-                    <div>
-                      <div className="font-semibold text-zinc-900">
-                        Room {o.roomNumber} · <span className="font-mono-tabular">{o.orderNumber}</span>
+              <div className="divide-y divide-zinc-100 max-h-80 overflow-y-auto">
+                {roomOrders.slice(0, 15).map((o) => {
+                  const normalizedRoom = (o.roomNumber || '').trim().toLowerCase();
+                  const isLinkedToFolio = folios.some((f) =>
+                    (f.orderIds || []).includes(o.id)
+                  );
+                  const matchingActiveFolio = activeFolios.find(
+                    (f) => f.roomNumber.trim().toLowerCase() === normalizedRoom
+                  );
+                  const canLinkToFolio =
+                    !isLinkedToFolio &&
+                    Boolean(matchingActiveFolio) &&
+                    o.status !== 'Cancelled' &&
+                    !o.billed;
+
+                  return (
+                    <div key={o.id} className="py-2.5 flex items-start justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-zinc-900">
+                          Room {o.roomNumber} ·{' '}
+                          <span className="font-mono-tabular">{o.orderNumber}</span>
+                          {o.guestName ? (
+                            <span className="font-normal text-zinc-500"> · {o.guestName}</span>
+                          ) : null}
+                        </div>
+                        {(o.mealSession || o.deliverySlot) && (
+                          <div className="text-[11px] font-medium text-emerald-800 mt-0.5">
+                            {o.mealSession || 'Meal Order'}
+                            {o.deliverySlot ? ` · ${o.deliverySlot}` : ''}
+                          </div>
+                        )}
+                        <div className="text-zinc-500 mt-0.5">
+                          {o.items.map((i) => `${i.qty}× ${i.name}`).join(', ')}
+                        </div>
                       </div>
-                      <div className="text-zinc-500">
-                        {o.items.map((i) => `${i.qty}× ${i.name}`).join(', ')}
+                      <div className="text-right shrink-0 space-y-1">
+                        <div className="font-mono-tabular font-semibold">{formatINR(o.subtotal)}</div>
+                        <div className="text-[11px] font-semibold text-[#9A7415]">
+                          {o.status}
+                          {isLinkedToFolio ? ' · Folio Linked' : ''}
+                        </div>
+                        {canLinkToFolio && matchingActiveFolio && (
+                          <button
+                            type="button"
+                            disabled={linkingOrderId === o.id}
+                            onClick={() => void handleLinkOrderToFolio(o, matchingActiveFolio)}
+                            className="px-2.5 py-1 rounded-md bg-[#141518] hover:bg-zinc-800 text-[#D4AF37] text-[11px] font-semibold whitespace-nowrap cursor-pointer disabled:opacity-60"
+                          >
+                            {linkingOrderId === o.id ? 'Linking...' : 'Post to Folio'}
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-mono-tabular font-semibold">{formatINR(o.subtotal)}</div>
-                      <div className="text-[11px] font-semibold text-[#9A7415]">{o.status}</div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

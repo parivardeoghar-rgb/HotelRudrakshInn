@@ -8,6 +8,8 @@ import {
 } from 'firebase/firestore';
 import {
   ArrowLeft,
+  ArrowRightLeft,
+  Bell,
   BellRing,
   CheckCircle2,
   Clock,
@@ -24,13 +26,15 @@ import {
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
+  changeCustomerOrderTable,
   createGuestServiceRequest,
   placeQrOrder,
   submitGuestFeedback,
 } from '../services/firestoreService';
-import { DEFAULT_HOTEL_SETTINGS, HOTEL_HERO_IMAGE } from '../data/seedCatalog';
+import { DEFAULT_HOTEL_SETTINGS, HOTEL_HERO_IMAGE, SEED_TABLES } from '../data/seedCatalog';
 import {
   BAIDYANATH_MEDIA_LOGO,
+  type DietaryTag,
   type HotelSettings,
   type MenuCategory,
   type MenuItem,
@@ -39,7 +43,9 @@ import {
   type OrderStatus,
   type RestaurantTable,
 } from '../types';
-import { formatINR, formatTime } from '../utils/format';
+import { formatINR, formatTime, toDate } from '../utils/format';
+import { useOrderReadyNotifications } from '../hooks/useOrderReadyNotifications';
+import { DietaryPreferenceField } from './DietaryPreferenceField';
 import { DishImage } from './DishImage';
 
 interface GuestPortalProps {
@@ -76,9 +82,13 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
   const [cart, setCart] = useState<OrderItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [guestName, setGuestName] = useState(customerName || '');
+  const [dietaryTags, setDietaryTags] = useState<DietaryTag[]>([]);
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
+  const [transferBusyOrderId, setTransferBusyOrderId] = useState<string | null>(null);
+  const [transferRequestedMap, setTransferRequestedMap] = useState<Record<string, string>>({});
 
   const storageKey = `rudraksh_guest_orders_${tableId}`;
   const [trackedOrderIds, setTrackedOrderIds] = useState<string[]>(() => {
@@ -104,6 +114,13 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
   };
+
+  const { isNotifyEnabled, toggleNotifyForOrder } = useOrderReadyNotifications(
+    trackedOrders,
+    (readyOrd) => {
+      showToast(`Order ${readyOrd.orderNumber} is Ready!`);
+    }
+  );
 
   // Subscribe to public menu, categories, table, and hotel settings
   useEffect(() => {
@@ -181,8 +198,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
               const filtered = prev.filter((p) => p.id !== ord.id);
               return [ord, ...filtered].sort(
                 (a, b) =>
-                  new Date(String(b.createdAt)).getTime() -
-                  new Date(String(a.createdAt)).getTime()
+                  toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime()
               );
             });
           }
@@ -269,6 +285,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
         guestName: guestName || customerName || 'Table Guest',
         guestSessionId: customerUid ? `cust_${customerUid}` : `session_${table.id}`,
         customerId: customerUid || undefined,
+        dietaryTags,
         specialInstructions,
       });
       const updated = [...trackedOrderIds, orderId].slice(-6);
@@ -279,6 +296,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
         // ignore storage quota errors
       }
       setCart([]);
+      setDietaryTags([]);
       setSpecialInstructions('');
       setCartOpen(false);
       setActiveTab('tracking');
@@ -329,6 +347,39 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
       showToast('Thank you for sharing your dining feedback!');
     } catch {
       showToast('Could not submit feedback right now.');
+    }
+  };
+
+  const handleChangeOrderTable = async (ord: Order, targetTableId: string) => {
+    if (!targetTableId || targetTableId === ord.tableId) return;
+    const targetMeta = SEED_TABLES.find((t) => t.id === targetTableId);
+    setTransferBusyOrderId(ord.id);
+    try {
+      const res = await changeCustomerOrderTable({
+        order: ord,
+        targetTableId,
+        targetTableNumberFallback: targetMeta?.tableNumber || targetTableId,
+        customerUid,
+      });
+      if (res.mode === 'transferred') {
+        showToast(`Order ${ord.orderNumber} synced to Table ${res.targetTableNumber}.`);
+      } else {
+        setTransferRequestedMap((prev) => ({
+          ...prev,
+          [ord.id]: res.targetTableNumber,
+        }));
+        showToast(
+          `Transfer request to Table ${res.targetTableNumber} sent to your steward.`
+        );
+      }
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : 'Unable to request table transfer right now.'
+      );
+    } finally {
+      setTransferBusyOrderId(null);
     }
   };
 
@@ -669,6 +720,22 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   0,
                   ORDER_STEPS.indexOf(ord.status === 'Completed' ? 'Served' : ord.status)
                 );
+                const canNotify =
+                  ord.status === 'New' ||
+                  ord.status === 'Accepted' ||
+                  ord.status === 'Preparing';
+                const notifyOn = isNotifyEnabled(ord.id);
+                const canChangeTable =
+                  !ord.billed &&
+                  ord.status !== 'Completed' &&
+                  ord.status !== 'Cancelled' &&
+                  Boolean(ord.tableId);
+                const otherTables = SEED_TABLES.filter((t) => t.id !== ord.tableId);
+                const selectedTargetId =
+                  transferTargets[ord.id] && transferTargets[ord.id] !== ord.tableId
+                    ? transferTargets[ord.id]
+                    : otherTables[0]?.id || '';
+
                 return (
                   <div
                     key={ord.id}
@@ -677,16 +744,40 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-zinc-100">
                       <div>
                         <div className="text-xs text-zinc-500">
-                          Order Confirmed · {formatTime(ord.createdAt)}
+                          Table {ord.tableNumber || tableId} · {formatTime(ord.createdAt)}
                         </div>
                         <h3 className="font-mono-tabular text-lg font-semibold text-zinc-900 mt-0.5">
                           {ord.orderNumber}
                         </h3>
                       </div>
-                      <div className="text-right">
-                        <div className="text-xs text-zinc-500">Status</div>
-                        <div className="text-sm font-semibold text-[#9A7415]">
-                          {ord.status}
+                      <div className="flex items-center gap-3 shrink-0">
+                        {canNotify && (
+                          <button
+                            type="button"
+                            aria-pressed={notifyOn}
+                            onClick={async () => {
+                              const res = await toggleNotifyForOrder(ord);
+                              if (res.message) showToast(res.message);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                              notifyOn
+                                ? 'bg-emerald-50 border-emerald-700/40 text-emerald-900'
+                                : 'bg-white border-zinc-300 text-zinc-700 hover:border-[#C59B27]'
+                            }`}
+                          >
+                            {notifyOn ? (
+                              <BellRing className="w-3.5 h-3.5 text-emerald-700" />
+                            ) : (
+                              <Bell className="w-3.5 h-3.5 text-zinc-500" />
+                            )}
+                            <span>{notifyOn ? 'Notify on' : 'Notify me'}</span>
+                          </button>
+                        )}
+                        <div className="text-right">
+                          <div className="text-xs text-zinc-500">Status</div>
+                          <div className="text-sm font-semibold text-[#9A7415]">
+                            {ord.status}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -741,6 +832,50 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                       <span>Order Subtotal (excl. taxes)</span>
                       <span className="font-mono-tabular">{formatINR(ord.subtotal)}</span>
                     </div>
+
+                    {canChangeTable && otherTables.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-zinc-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-1.5 text-zinc-600 font-medium">
+                          <ArrowRightLeft className="w-3.5 h-3.5 text-[#9A7415] shrink-0" />
+                          <label htmlFor={`guest-change-table-${ord.id}`}>
+                            Switched seats? Move order:
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            id={`guest-change-table-${ord.id}`}
+                            value={selectedTargetId}
+                            disabled={transferBusyOrderId === ord.id}
+                            onChange={(e) =>
+                              setTransferTargets((prev) => ({
+                                ...prev,
+                                [ord.id]: e.target.value,
+                              }))
+                            }
+                            className="px-2.5 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-[#C59B27]"
+                          >
+                            {otherTables.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                Table {t.tableNumber} · {t.section}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!selectedTargetId || transferBusyOrderId === ord.id}
+                            onClick={() => void handleChangeOrderTable(ord, selectedTargetId)}
+                            className="px-3 py-1.5 rounded-lg border border-[#C59B27]/70 bg-[#FDF9EC] hover:bg-[#F7EBC4] text-[#141518] text-xs font-semibold transition-colors disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
+                          >
+                            {transferBusyOrderId === ord.id ? 'Updating...' : 'Change Table'}
+                          </button>
+                        </div>
+                        {transferRequestedMap[ord.id] && (
+                          <div className="w-full text-[11px] font-medium text-amber-800">
+                            Transfer to Table {transferRequestedMap[ord.id]} requested · Steward notified.
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -999,6 +1134,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                 />
               </div>
 
+              <DietaryPreferenceField value={dietaryTags} onChange={setDietaryTags} />
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-700 mb-1">
                   Special Kitchen Instructions (Optional)
@@ -1008,7 +1145,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   maxLength={300}
                   value={specialInstructions}
                   onChange={(e) => setSpecialInstructions(e.target.value)}
-                  placeholder="Less spicy, Jain preparation, extra chutney..."
+                  placeholder="Less spicy, extra chutney..."
                   className="w-full px-3.5 py-2 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#C59B27]"
                 />
               </div>

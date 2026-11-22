@@ -560,6 +560,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 : 'No ratings yet'}
             </span>
           </div>
+
+          <div className="pt-2 border-t border-zinc-100 flex items-center justify-between text-xs">
+            <span className="text-zinc-500">
+              Guest Meal Photos (
+              {orders.filter((o) => Boolean(o.mealPhotoUrl) && (!o.mealPhotoStatus || o.mealPhotoStatus === 'Pending Review')).length}{' '}
+              pending)
+            </span>
+            <button
+              type="button"
+              onClick={() => onNavigate('feedback')}
+              className="font-semibold text-[#9A7415] hover:underline inline-flex items-center gap-0.5 cursor-pointer"
+            >
+              Review <ArrowUpRight className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

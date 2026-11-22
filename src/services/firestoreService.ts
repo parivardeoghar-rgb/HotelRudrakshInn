@@ -42,9 +42,12 @@ import {
   type AppNotification,
   type Bill,
   type CustomerProfile,
+  type DietaryTag,
   type Feedback,
   type HotelSettings,
   type InventoryItem,
+  type MealPhotoReviewStatus,
+  type MealSession,
   type MenuCategory,
   type MenuItem,
   type Order,
@@ -441,6 +444,7 @@ export async function resolveOrCreateCustomerProfile(user: {
         .slice(0, 80),
       phone: (user.phoneNumber || '').slice(0, 20),
       dietaryPreference: 'all',
+      favoriteItemIds: [],
       active: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -468,6 +472,27 @@ export async function updateCustomerProfile(
       phone: (updates.phone || '').trim().slice(0, 20),
       preferredTable: (updates.preferredTable || '').trim().slice(0, 20),
       dietaryPreference: cleanDiet,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `customer_profiles/${uid}`);
+  }
+}
+
+export async function updateCustomerFavoriteItems(
+  uid: string,
+  favoriteItemIds: string[]
+): Promise<void> {
+  try {
+    const cleanIds = Array.from(
+      new Set(
+        favoriteItemIds
+          .map((id) => String(id).trim().slice(0, 64))
+          .filter(Boolean)
+      )
+    ).slice(0, 100);
+    await updateDoc(doc(db, 'customer_profiles', uid), {
+      favoriteItemIds: cleanIds,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -564,18 +589,51 @@ function generateOrderNumber(): string {
   return `ORD-${num}`;
 }
 
+function sanitizeDietaryTags(tags?: DietaryTag[]): DietaryTag[] {
+  return Array.from(
+    new Set(
+      (tags || []).filter(
+        (t): t is DietaryTag => t === 'Jain' || t === 'Nut allergy'
+      )
+    )
+  ).slice(0, 8);
+}
+
+function sanitizeMealSession(session?: MealSession): MealSession | undefined {
+  if (
+    session === 'Morning Breakfast' ||
+    session === 'Afternoon Lunch' ||
+    session === 'Evening' ||
+    session === 'Dinner'
+  ) {
+    return session;
+  }
+  return undefined;
+}
+
+function sanitizeDeliverySlot(slot?: string): string | undefined {
+  const clean = (slot || '').trim().slice(0, 40);
+  return clean || undefined;
+}
+
 export async function placeQrOrder(params: {
   table: RestaurantTable;
   items: OrderItem[];
   guestName?: string;
   guestSessionId?: string;
   customerId?: string;
+  mealSession?: MealSession;
+  deliverySlot?: string;
+  dietaryTags?: DietaryTag[];
   specialInstructions?: string;
 }): Promise<string> {
   const orderId = createDocId('ord');
   const orderNumber = generateOrderNumber();
   const subtotal = calculateSubtotal(params.items);
   const notifId = createDocId('notif');
+  const cleanDietaryTags = sanitizeDietaryTags(params.dietaryTags);
+  const cleanMealSession = sanitizeMealSession(params.mealSession);
+  const cleanSlot = sanitizeDeliverySlot(params.deliverySlot);
 
   try {
     const batch = writeBatch(db);
@@ -591,6 +649,9 @@ export async function placeQrOrder(params: {
       status: 'New' as OrderStatus,
       priority: 'Normal' as OrderPriority,
       items: params.items.slice(0, 50),
+      ...(cleanMealSession ? { mealSession: cleanMealSession } : {}),
+      ...(cleanSlot ? { deliverySlot: cleanSlot } : {}),
+      ...(cleanDietaryTags.length > 0 ? { dietaryTags: cleanDietaryTags } : {}),
       specialInstructions: (params.specialInstructions || '').trim().slice(0, 300),
       subtotal,
       billed: false,
@@ -606,11 +667,92 @@ export async function placeQrOrder(params: {
       updatedAt: serverTimestamp(),
     });
 
+    const dietarySuffix =
+      cleanDietaryTags.length > 0 ? ` [${cleanDietaryTags.join(', ')}]` : '';
+    const sessionSuffix = cleanMealSession ? ` (${cleanMealSession})` : '';
+
     batch.set(doc(db, 'notifications', notifId), {
       id: notifId,
       type: 'qr_order',
       title: `New QR Order · Table ${params.table.tableNumber}`,
-      message: `${orderNumber} (${params.items.reduce((s, i) => s + i.qty, 0)} items) placed via table QR menu.`,
+      message: `${orderNumber} (${params.items.reduce((s, i) => s + i.qty, 0)} items) placed via table QR menu.${sessionSuffix}${dietarySuffix}`.slice(
+        0,
+        250
+      ),
+      targetRoles: ['super_admin', 'manager', 'waiter', 'kitchen'],
+      relatedId: orderId,
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    return orderId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `orders/${orderId}`);
+  }
+}
+
+export async function placeGuestRoomOrder(params: {
+  roomNumber: string;
+  items: OrderItem[];
+  guestName?: string;
+  guestSessionId?: string;
+  customerId?: string;
+  mealSession?: MealSession;
+  deliverySlot?: string;
+  dietaryTags?: DietaryTag[];
+  specialInstructions?: string;
+}): Promise<string> {
+  const cleanRoom = params.roomNumber.trim().slice(0, 20);
+  if (!cleanRoom) {
+    throw new Error('Please enter or select your hotel room number.');
+  }
+
+  const orderId = createDocId('ord');
+  const orderNumber = generateOrderNumber();
+  const subtotal = calculateSubtotal(params.items);
+  const notifId = createDocId('notif');
+  const cleanDietaryTags = sanitizeDietaryTags(params.dietaryTags);
+  const cleanMealSession = sanitizeMealSession(params.mealSession);
+  const cleanSlot = sanitizeDeliverySlot(params.deliverySlot);
+
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'orders', orderId), {
+      id: orderId,
+      orderNumber,
+      source: 'room_service' as OrderSource,
+      roomNumber: cleanRoom,
+      guestName: (params.guestName || `Room ${cleanRoom} Guest`).trim().slice(0, 80),
+      guestSessionId: (params.guestSessionId || `room_${cleanRoom}`).slice(0, 128),
+      ...(params.customerId ? { customerId: params.customerId.slice(0, 128) } : {}),
+      status: 'New' as OrderStatus,
+      priority: 'Normal' as OrderPriority,
+      items: params.items.slice(0, 50),
+      ...(cleanMealSession ? { mealSession: cleanMealSession } : {}),
+      ...(cleanSlot ? { deliverySlot: cleanSlot } : {}),
+      ...(cleanDietaryTags.length > 0 ? { dietaryTags: cleanDietaryTags } : {}),
+      specialInstructions: (params.specialInstructions || '').trim().slice(0, 300),
+      subtotal,
+      billed: false,
+      inventoryDeducted: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    const sessionLabel = [cleanMealSession, cleanSlot].filter(Boolean).join(' · ');
+    const sessionSuffix = sessionLabel ? ` · ${sessionLabel}` : '';
+    const dietarySuffix =
+      cleanDietaryTags.length > 0 ? ` [${cleanDietaryTags.join(', ')}]` : '';
+
+    batch.set(doc(db, 'notifications', notifId), {
+      id: notifId,
+      type: 'room_order',
+      title: `Room Order · Room ${cleanRoom}`,
+      message: `${orderNumber} (${params.items.reduce((s, i) => s + i.qty, 0)} items) for Room ${cleanRoom}${sessionSuffix}.${dietarySuffix}`.slice(
+        0,
+        250
+      ),
       targetRoles: ['super_admin', 'manager', 'waiter', 'kitchen'],
       relatedId: orderId,
       read: false,
@@ -633,6 +775,9 @@ export async function placeStaffOrder(params: {
   waiterId: string;
   waiterName: string;
   priority?: OrderPriority;
+  mealSession?: MealSession;
+  deliverySlot?: string;
+  dietaryTags?: DietaryTag[];
   specialInstructions?: string;
   folioId?: string;
 }): Promise<string> {
@@ -640,6 +785,9 @@ export async function placeStaffOrder(params: {
   const orderNumber = generateOrderNumber();
   const subtotal = calculateSubtotal(params.items);
   const notifId = createDocId('notif');
+  const cleanDietaryTags = sanitizeDietaryTags(params.dietaryTags);
+  const cleanMealSession = sanitizeMealSession(params.mealSession);
+  const cleanSlot = sanitizeDeliverySlot(params.deliverySlot);
 
   try {
     const batch = writeBatch(db);
@@ -653,6 +801,9 @@ export async function placeStaffOrder(params: {
       status: 'New' as OrderStatus,
       priority: params.priority || 'Normal',
       items: params.items.slice(0, 50),
+      ...(cleanMealSession ? { mealSession: cleanMealSession } : {}),
+      ...(cleanSlot ? { deliverySlot: cleanSlot } : {}),
+      ...(cleanDietaryTags.length > 0 ? { dietaryTags: cleanDietaryTags } : {}),
       specialInstructions: (params.specialInstructions || '').trim().slice(0, 300),
       subtotal,
       billed: false,
@@ -693,6 +844,9 @@ export async function placeStaffOrder(params: {
       }
     }
 
+    const dietarySuffix =
+      cleanDietaryTags.length > 0 ? ` [${cleanDietaryTags.join(', ')}]` : '';
+
     batch.set(doc(db, 'notifications', notifId), {
       id: notifId,
       type: 'waiter_order',
@@ -701,7 +855,7 @@ export async function placeStaffOrder(params: {
         : params.roomNumber
         ? `Room Service · Room ${params.roomNumber}`
         : `New POS Order · ${orderNumber}`,
-      message: `${orderNumber} created by ${params.waiterName} (${params.items.length} dishes).`,
+      message: `${orderNumber} created by ${params.waiterName} (${params.items.length} dishes).${dietarySuffix}`,
       targetRoles: ['super_admin', 'manager', 'kitchen', 'cashier'],
       relatedId: orderId,
       read: false,
@@ -718,7 +872,8 @@ export async function placeStaffOrder(params: {
 export async function addItemsToExistingOrder(
   order: Order,
   newItems: OrderItem[],
-  additionalInstructions?: string
+  additionalInstructions?: string,
+  additionalDietaryTags?: DietaryTag[]
 ): Promise<void> {
   const merged = [...order.items];
   for (const incoming of newItems) {
@@ -737,12 +892,17 @@ export async function addItemsToExistingOrder(
     .filter(Boolean)
     .join(' | ')
     .slice(0, 300);
+  const mergedTags = sanitizeDietaryTags([
+    ...(order.dietaryTags || []),
+    ...(additionalDietaryTags || []),
+  ]);
 
   try {
     const batch = writeBatch(db);
     batch.update(doc(db, 'orders', order.id), {
       items: finalItems,
       subtotal,
+      ...(mergedTags.length > 0 ? { dietaryTags: mergedTags } : {}),
       specialInstructions: combinedNotes,
       status: order.status === 'Served' ? 'Accepted' : order.status,
       updatedAt: serverTimestamp(),
@@ -1209,6 +1369,22 @@ export async function settleRoomFolio(folio: RoomFolio, paidAmount: number): Pro
   }
 }
 
+export async function linkRoomOrderToFolio(
+  order: Order,
+  folio: RoomFolio
+): Promise<void> {
+  if ((folio.orderIds || []).includes(order.id)) return;
+  try {
+    await updateDoc(doc(db, 'room_folios', folio.id), {
+      orderIds: [...(folio.orderIds || []), order.id].slice(0, 50),
+      totalAmount: Math.round(((folio.totalAmount || 0) + order.subtotal) * 100) / 100,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `room_folios/${folio.id}`);
+  }
+}
+
 // ------------------------------------------------------------------
 // Tables Management
 // ------------------------------------------------------------------
@@ -1569,6 +1745,181 @@ export async function resolveServiceRequest(req: ServiceRequest): Promise<void> 
   }
 }
 
+export async function changeCustomerOrderTable(params: {
+  order: Order;
+  targetTableId: string;
+  targetTableNumberFallback?: string;
+  customerUid?: string | null;
+}): Promise<{ mode: 'transferred' | 'requested'; targetTableNumber: string }> {
+  const { order, targetTableId, targetTableNumberFallback, customerUid } = params;
+  if (!order.tableId || order.tableId === targetTableId) {
+    return {
+      mode: 'transferred',
+      targetTableNumber: order.tableNumber || targetTableNumberFallback || targetTableId,
+    };
+  }
+
+  try {
+    const [sourceSnap, targetSnap] = await Promise.all([
+      getDoc(doc(db, 'tables', order.tableId)),
+      getDoc(doc(db, 'tables', targetTableId)),
+    ]);
+
+    if (!sourceSnap.exists() || !targetSnap.exists()) {
+      throw new Error('Tables are not initialized in the floor plan yet. Please notify our restaurant staff.');
+    }
+
+    const sourceTable = sourceSnap.data() as RestaurantTable;
+    const targetTable = targetSnap.data() as RestaurantTable;
+
+    const canDirectTransfer =
+      Boolean(customerUid) &&
+      order.customerId === customerUid &&
+      !order.billed &&
+      ['New', 'Accepted', 'Preparing', 'Ready', 'Served'].includes(order.status) &&
+      targetTable.status === 'Available';
+
+    if (canDirectTransfer) {
+      const tableStatusMap: Partial<Record<OrderStatus, TableStatus>> = {
+        New: 'Ordered',
+        Accepted: 'Ordered',
+        Preparing: 'Preparing',
+        Ready: 'Ready',
+        Served: 'Served',
+      };
+      const nextTableStatus: TableStatus = tableStatusMap[order.status] || 'Ordered';
+      const notifId = createDocId('notif');
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, 'orders', order.id), {
+        tableId: targetTable.id,
+        tableNumber: targetTable.tableNumber,
+        updatedAt: serverTimestamp(),
+      });
+
+      batch.update(doc(db, 'tables', targetTable.id), {
+        status: nextTableStatus,
+        currentOrderId: order.id,
+        orderTime: sourceTable.orderTime || serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      if (sourceTable.currentOrderId === order.id) {
+        batch.update(doc(db, 'tables', sourceTable.id), {
+          status: 'Available' as TableStatus,
+          currentOrderId: '',
+          currentBillTotal: 0,
+          orderTime: null,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      batch.set(doc(db, 'notifications', notifId), {
+        id: notifId,
+        type: 'table_transfer',
+        title: `Table Changed · ${order.orderNumber}`,
+        message: `Guest moved ${order.orderNumber} from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}.`,
+        targetRoles: ['super_admin', 'manager', 'waiter', 'kitchen'],
+        relatedId: order.id,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+      return { mode: 'transferred', targetTableNumber: targetTable.tableNumber };
+    }
+
+    const reqId = createDocId('sreq');
+    const notifId = createDocId('notif');
+    const batch = writeBatch(db);
+    const noteText =
+      targetTable.status === 'Available'
+        ? `Guest requested to move ${order.orderNumber} from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber}.`
+        : `Guest requested to move ${order.orderNumber} from Table ${sourceTable.tableNumber} to Table ${targetTable.tableNumber} (currently ${targetTable.status}).`;
+
+    batch.set(doc(db, 'service_requests', reqId), {
+      id: reqId,
+      tableId: sourceTable.id,
+      tableNumber: sourceTable.tableNumber,
+      type: 'table_transfer',
+      status: 'Pending',
+      targetTableId: targetTable.id,
+      targetTableNumber: targetTable.tableNumber,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      note: noteText.slice(0, 200),
+      createdAt: serverTimestamp(),
+    });
+
+    batch.set(doc(db, 'notifications', notifId), {
+      id: notifId,
+      type: 'table_transfer',
+      title: `Table Transfer · ${order.orderNumber}`,
+      message: noteText.slice(0, 250),
+      targetRoles: ['waiter', 'kitchen', 'manager', 'super_admin'],
+      relatedId: order.id,
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    return { mode: 'requested', targetTableNumber: targetTable.tableNumber };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+  }
+}
+
+export async function approveTableTransferRequest(
+  req: ServiceRequest,
+  tables: RestaurantTable[],
+  orders: Order[]
+): Promise<boolean> {
+  const sourceTable = tables.find((t) => t.id === req.tableId);
+  const targetTable = req.targetTableId
+    ? tables.find((t) => t.id === req.targetTableId)
+    : undefined;
+  const order = req.orderId
+    ? orders.find((o) => o.id === req.orderId)
+    : sourceTable?.currentOrderId
+    ? orders.find((o) => o.id === sourceTable.currentOrderId)
+    : undefined;
+
+  if (sourceTable && targetTable && order) {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'orders', order.id), {
+      tableId: targetTable.id,
+      tableNumber: targetTable.tableNumber,
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, 'tables', targetTable.id), {
+      status: sourceTable.status === 'Available' ? ('Ordered' as TableStatus) : sourceTable.status,
+      currentOrderId: order.id,
+      currentBillTotal: order.subtotal,
+      assignedWaiterId: sourceTable.assignedWaiterId || '',
+      assignedWaiterName: sourceTable.assignedWaiterName || '',
+      orderTime: sourceTable.orderTime || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    if (sourceTable.currentOrderId === order.id) {
+      batch.update(doc(db, 'tables', sourceTable.id), {
+        status: 'Available' as TableStatus,
+        currentOrderId: '',
+        currentBillTotal: 0,
+        orderTime: null,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    batch.update(doc(db, 'service_requests', req.id), {
+      status: 'Resolved',
+    });
+    await batch.commit();
+    return true;
+  }
+
+  await resolveServiceRequest(req);
+  return false;
+}
+
 export async function submitGuestFeedback(
   data: Omit<Feedback, 'id' | 'createdAt'>
 ): Promise<void> {
@@ -1611,6 +1962,86 @@ export async function deleteFeedback(feedbackId: string): Promise<void> {
     await deleteDoc(doc(db, 'feedback', feedbackId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `feedback/${feedbackId}`);
+  }
+}
+
+export async function attachOrderMealPhoto(params: {
+  order: Order;
+  customerUid: string;
+  imageDataUrl: string;
+  caption?: string;
+  guestName?: string;
+}): Promise<void> {
+  const { order, customerUid, imageDataUrl, caption, guestName } = params;
+  if (!order.customerId || order.customerId !== customerUid) {
+    throw new Error('You can only attach meal photos to your own orders.');
+  }
+  if (order.status === 'Cancelled') {
+    throw new Error('Meal photos cannot be attached to cancelled orders.');
+  }
+  if (!imageDataUrl.startsWith('data:image/') || imageDataUrl.length < 20 || imageDataUrl.length > 180000) {
+    throw new Error('Photo must be a compressed image under 180 KB.');
+  }
+
+  const cleanCaption = (caption || '').trim().slice(0, 160);
+  const notifId = createDocId('notif');
+  const locationLabel = order.tableNumber
+    ? `Table ${order.tableNumber}`
+    : order.roomNumber
+    ? `Room ${order.roomNumber}`
+    : 'Dining Order';
+
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'orders', order.id), {
+      mealPhotoUrl: imageDataUrl,
+      mealPhotoCaption: cleanCaption,
+      mealPhotoStatus: 'Pending Review' as MealPhotoReviewStatus,
+      mealPhotoUploadedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'notifications', notifId), {
+      id: notifId,
+      type: 'meal_photo',
+      title: `Meal Photo · ${order.orderNumber}`,
+      message: `${(guestName || order.guestName || 'Guest').trim().slice(0, 50)} uploaded a meal photo for ${order.orderNumber} (${locationLabel}) for management review.`.slice(
+        0,
+        250
+      ),
+      targetRoles: ['super_admin', 'manager'],
+      relatedId: order.id,
+      read: false,
+      createdAt: serverTimestamp(),
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
+  }
+}
+
+export async function reviewOrderMealPhoto(params: {
+  order: Order;
+  status: MealPhotoReviewStatus;
+  actor: StaffProfile;
+}): Promise<void> {
+  const { order, status, actor } = params;
+  try {
+    await updateDoc(doc(db, 'orders', order.id), {
+      mealPhotoStatus: status,
+      mealPhotoReviewedBy: actor.displayName.trim().slice(0, 80),
+      updatedAt: serverTimestamp(),
+    });
+    await recordAuditLog({
+      action: 'MEAL_PHOTO_REVIEWED',
+      actorUid: actor.uid,
+      actorName: actor.displayName,
+      actorRole: actor.role,
+      targetType: 'order',
+      targetId: order.id,
+      summary: `Marked guest meal photo on ${order.orderNumber} as ${status}`,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
   }
 }
 
